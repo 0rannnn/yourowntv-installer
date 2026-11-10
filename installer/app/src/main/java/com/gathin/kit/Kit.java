@@ -199,6 +199,8 @@ final class Kit implements WebServer.Handler {
     private void install(JSONObject o) throws Exception {
         boolean dry = o.optBoolean("dry");
         redirect = "";
+        tcl = sh("getprop ro.product.brand; getprop ro.product.manufacturer").matches("(?is).*\\bTCL\\b.*");
+        if (tcl) say("מצב TCL: השלט של TCL (גלגל השיניים, YouTube) ומסך הבית של Google TV מסודרים לבד", "ok");
         Adb adb = Adb.get(context);
         if (!adb.connectSelf()) throw new IllegalStateException("לא מחובר: קודם לצמד עם הקוד (שלב 1)");
         List<String> all = slots();
@@ -349,6 +351,30 @@ final class Kit implements WebServer.Handler {
     /** stock_home_redirect: the stock launcher that kept Home (Google TV), or "" when ours is Home. */
     private String redirect = "";
 
+    /** TCL mode (same as the PC wizard's TCL_PROFILE): the TCL remote's gear and YouTube keys, Live TV, TCL extras hidden.
+     *  Netflix, Prime Video, Disney+, Input and the mic are handled by TCL's own firmware. */
+    private boolean tcl;
+    private static final String[][] TCL_PROFILE = {
+            {"settings_key_keycodes", "83"},
+            {"app_keys", "190:com.google.android.youtube.tv", "4065:com.google.android.youtube.tv"},
+            {"hidden_apps", "com.tcl.dashboard", "com.tcl.partnercustomizer", "com.tcl.suspension"},
+            {"app_labels", "com.tcl.tv=Live TV"}};
+
+    private static void tclMode(JSONObject cfg) throws Exception {
+        for (String[] entry : TCL_PROFILE) {
+            JSONArray have = cfg.optJSONArray(entry[0]);
+            if (have == null) have = new JSONArray();
+            for (int i = 1; i < entry.length; i++) {
+                Object value = entry[0].equals("settings_key_keycodes") ? (Object) Integer.parseInt(entry[i]) : entry[i];
+                boolean found = false;
+                for (int j = 0; j < have.length(); j++) if (String.valueOf(have.get(j)).equals(entry[i])) found = true;
+                if (!found) have.put(value);
+            }
+            cfg.put(entry[0], have);
+        }
+        cfg.put("live_tv_package", "com.tcl.tv");
+    }
+
     private boolean isFormovie() throws Exception {
         return sh("getprop ro.product.model; getprop ro.product.device").matches("(?is).*(C045|Formovie|tianshan).*");
     }
@@ -359,6 +385,7 @@ final class Kit implements WebServer.Handler {
         cfg.put("greeting_name", o.optString("name")).put("greeting_name_he", o.optString("name_he"))
                 .put("own_screensaver", o.optBoolean("screensaver", true)).put("keep_key_helper", true);
         cfg.remove("home_idle_clock_minutes");
+        if (tcl) tclMode(cfg);
         if (redirect.isEmpty()) cfg.remove("stock_home_redirect");
         else cfg.put("stock_home_redirect", redirect);
         if (place != null) {
