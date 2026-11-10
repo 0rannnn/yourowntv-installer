@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111318">
+<title>התקנת מסך הבית</title>
+<style>
+  :root { --bg: #111318; --card: #1c1f27; --line: #2c303b; --text: #f2f3f5; --dim: #9aa0ad; --blue: #0a84ff; --red: #ff453a;
+          --green: #30d158; --amber: #ffd60a; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.5 -apple-system, system-ui, "Segoe UI", Arial, sans-serif;
+         padding: 0 0 env(safe-area-inset-bottom); }
+  header { padding: 22px 18px 6px; }
+  h1 { margin: 0; font-size: 24px; font-weight: 700; }
+  .sub { color: var(--dim); font-size: 14px; margin-top: 4px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin: 12px 12px; }
+  section.off { opacity: .45; pointer-events: none; }
+  h2 { font-size: 18px; margin: 0 0 10px; display: flex; gap: 10px; align-items: center; }
+  h2 .n { background: var(--blue); color: #fff; border-radius: 50%; min-width: 28px; height: 28px; display: inline-flex;
+          align-items: center; justify-content: center; font-size: 15px; }
+  section.ok h2 .n { background: var(--green); }
+  ol.steps { margin: 0 0 12px; padding-inline-start: 22px; color: var(--dim); font-size: 15px; }
+  ol.steps b { color: var(--text); font-weight: 600; }
+  input[type=text], input[type=tel] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line);
+       border-radius: 12px; padding: 13px 14px; font: inherit; margin: 6px 0; }
+  input.code { font-size: 30px; letter-spacing: 10px; text-align: center; direction: ltr; }
+  button { font: inherit; border-radius: 14px; padding: 13px 16px; border: 1px solid var(--line); background: var(--bg); color: var(--text);
+           width: 100%; margin-top: 8px; }
+  button.go { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; }
+  .msg { font-size: 15px; margin-top: 8px; min-height: 1.2em; }
+  .msg.ok { color: var(--green); } .msg.err { color: var(--red); } .msg.warn { color: var(--amber); }
+  .themes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .theme { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); }
+  .theme img { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; background: #000; }
+  .theme .meta { padding: 8px 10px; font-size: 14px; }
+  label.check { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; font-size: 15px; }
+  label.check input { width: 22px; height: 22px; accent-color: var(--blue); flex: none; margin-top: 1px; }
+  details { color: var(--dim); font-size: 13px; margin: 0 32px 6px 0; }
+  details ul { direction: ltr; text-align: right; padding-inline-start: 18px; }
+  #log { background: #0b0c10; border: 1px solid var(--line); border-radius: 12px; padding: 10px; max-height: 50vh; overflow: auto;
+         font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; display: none; margin-top: 10px; }
+  #log .step { color: #64d2ff; font-weight: 600; margin-top: 6px; }
+  #log .ok { color: var(--green); } #log .error { color: var(--red); } #log .warn { color: var(--amber); } #log .dry { color: #bf5af2; }
+</style>
+</head>
+<body>
+<header>
+  <h1>✨ התקנת מסך הבית</h1>
+  <div class="sub" id="device">מתחבר למקרן…</div>
+</header>
+
+<section id="s1">
+  <h2><span class="n">1</span>חיבור למקרן</h2>
+  <ol class="steps">
+    <li>במקרן: <b>הגדרות ← מערכת ← מידע</b>, ולחיצה 7 פעמים על <b>Build</b> (אם עוד לא עשית).</li>
+    <li><b>הגדרות ← מערכת ← אפשרויות מפתחים ← Wireless debugging</b> ← לבחור <b>Enabled</b>.</li>
+    <li>שם: <b>Pair device with pairing code</b>. במקרן יופיע קוד של 6 ספרות. להשאיר את החלון פתוח.</li>
+    <li>לכתוב כאן את הקוד:</li>
+  </ol>
+  <input type="tel" class="code" id="code" maxlength="6" inputmode="numeric" placeholder="000000">
+  <button class="go" id="pair">חבר</button>
+  <button id="already">כבר חיברתי פעם, רק התחבר</button>
+  <div class="msg" id="pairMsg"></div>
+</section>
+
+<section id="s2" class="off">
+  <h2><span class="n">2</span>למי המקרן</h2>
+  <input type="text" id="name" placeholder="השם באנגלית (Dani)" dir="ltr" autocomplete="off">
+  <input type="text" id="nameHe" placeholder="השם בעברית (דני)" autocomplete="off">
+  <input type="text" id="city" placeholder="עיר, למשל חולון" autocomplete="off">
+  <button id="findCity">חפש עיר (למזג האוויר)</button>
+  <div class="msg" id="cityMsg"></div>
+</section>
+
+<section id="s3" class="off">
+  <h2><span class="n">3</span>ערכות נושא</h2>
+  <div class="sub" style="margin-bottom:10px">את הראשית רואים מיד; את השאר בוחרים בחלונית ← ערכת נושא.</div>
+  <div class="themes" id="themes"></div>
+</section>
+
+<section id="s4" class="off">
+  <h2><span class="n">4</span>אפשרויות</h2>
+  <div id="lists"></div>
+  <label class="check"><input type="checkbox" id="saver" checked><span>שומר המסך שלנו לכל ערכה, במקום של Google</span></label>
+  <label class="check"><input type="checkbox" id="blockGoogle" checked><span>לחסום לגמרי את שומר המסך של Google</span></label>
+  <label class="check"><input type="checkbox" id="dns"><span>חוסם פרסומות (AdGuard DNS): מאט קצת טעינות</span></label>
+  <label class="check"><input type="checkbox" id="dry"><span>ניסיון בלבד: לבדוק הכל בלי לשנות כלום</span></label>
+</section>
+
+<section id="s5" class="off">
+  <h2><span class="n">5</span>התקנה</h2>
+  <div class="sub">קודם נשמר גיבוי במקרן, ואפשר להחזיר הכל ממנו. לוקח כמה דקות; כדאי ללחוץ בשלט מדי פעם.</div>
+  <button class="go" id="run">התחל התקנה</button>
+  <div class="msg" id="runMsg"></div>
+  <div id="log"></div>
+  <button id="restore" style="display:none">להחזיר את המקרן למצב שלפני ההתקנה</button>
+</section>
+
+<section>
+  <div class="sub">בסוף: במקרן, להחזיר את Wireless debugging ל-Disabled. ככה אף אחד אחר ברשת לא יכול להתחבר.</div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+let info = null, place = null;
+const NAMES = { '1': ['אפליקציות סטרימינג שלא בשימוש', false], '2': ['אפליקציית הדמו והשירותים האזוריים (בטוח)', true],
+                '3': ['מסך הבית של Google TV (רק אחרי שהמסך שלנו פעיל)', true] };
+const msg = (id, t, k) => { $(id).textContent = t; $(id).className = 'msg ' + (k || ''); };
+const post = async (url, body) => (await fetch(url, { method: 'POST', body: JSON.stringify(body || {}) })).json();
+const unlock = () => { $('s1').classList.add('ok'); ['s2', 's3', 's4', 's5'].forEach(id => $(id).classList.remove('off')); };
+
+async function load() {
+  info = await (await fetch('/api/info')).json();
+  $('device').textContent = `${info.model} · Android ${info.android}` + (info.connected ? ' · מחובר ✓' : '');
+  if (info.connected) { unlock(); msg('pairMsg', 'מחובר ✓', 'ok'); }
+  $('restore').style.display = info.backup ? '' : 'none';
+  const box = $('themes'); box.innerHTML = '';
+  info.themes.forEach((t, i) => {
+    const c = document.createElement('div'); c.className = 'theme';
+    c.innerHTML = `<img alt="" loading="lazy" src="/api/preview?slot=${encodeURIComponent(t.slot)}"><div class="meta"><b></b>
+      <label class="check"><input type="checkbox" class="pick" value="${t.slot}" checked><span>להתקין</span></label>
+      <label class="check"><input type="radio" name="def" value="${t.slot}" ${i === 0 ? 'checked' : ''}><span>ראשית</span></label></div>`;
+    c.querySelector('b').textContent = t.name_he;
+    box.append(c);
+  });
+  const lists = $('lists'); lists.innerHTML = '';
+  for (const l of info.lists) {
+    const [title, on] = NAMES[l.file.split('-')[0]] || [l.file, false];
+    const w = document.createElement('div');
+    w.innerHTML = `<label class="check"><input type="checkbox" class="list" value="${l.file}" ${on ? 'checked' : ''}><span></span></label>
+      <details><summary>מה בפנים (${l.packages.length})</summary><ul></ul></details>`;
+    w.querySelector('span').textContent = 'השבתה: ' + title;
+    l.packages.forEach(p => { const li = document.createElement('li'); li.textContent = p.package + (p.note ? ' — ' + p.note : ''); w.querySelector('ul').append(li); });
+    lists.append(w);
+  }
+}
+
+$('pair').onclick = async () => {
+  const code = $('code').value.replace(/\D/g, '');
+  if (code.length !== 6) { msg('pairMsg', 'הקוד הוא 6 ספרות', 'err'); return; }
+  $('pair').disabled = true; msg('pairMsg', 'מחבר… (עד חצי דקה)');
+  const r = await post('/api/pair', { code });
+  $('pair').disabled = false;
+  if (r.ok) { msg('pairMsg', 'מחובר ✓ אפשר לסגור את חלון הקוד במקרן', 'ok'); unlock(); }
+  else msg('pairMsg', r.error || 'לא הצליח', 'err');
+};
+$('already').onclick = async () => {
+  msg('pairMsg', 'מתחבר…');
+  const r = await post('/api/connect');
+  if (r.ok) { msg('pairMsg', 'מחובר ✓', 'ok'); unlock(); } else msg('pairMsg', r.error || 'לא הצליח', 'err');
+};
+
+// The city is looked up from the phone (Open-Meteo, free, no key).
+$('findCity').onclick = async () => {
+  const city = $('city').value.trim(); if (!city) return;
+  msg('cityMsg', 'מחפש…');
+  try {
+    const q = l => fetch(`https://geocoding-api.open-meteo.com/v1/search?count=1&language=${l}&name=${encodeURIComponent(city)}`).then(r => r.json());
+    const [he, en] = await Promise.all([q('he'), q('en')]);
+    const h = (he.results || [])[0], e = (en.results || [])[0];
+    if (!h) throw 0;
+    place = { lat: Math.round(h.latitude * 1000) / 1000, lon: Math.round(h.longitude * 1000) / 1000, he: h.name, en: e ? e.name : h.name };
+    msg('cityMsg', `${place.he} ✓`, 'ok');
+  } catch (e) { place = null; msg('cityMsg', 'לא נמצא. אפשר להמשיך בלי מזג אוויר.', 'warn'); }
+};
+
+$('run').onclick = async () => {
+  const name = $('name').value.trim(), nameHe = $('nameHe').value.trim();
+  if (!name && !nameHe) { msg('runMsg', 'צריך שם (שלב 2)', 'err'); return; }
+  const themes = [...document.querySelectorAll('.pick:checked')].map(c => c.value);
+  if (!themes.length) { msg('runMsg', 'לבחור לפחות ערכה אחת (שלב 3)', 'err'); return; }
+  const def = (document.querySelector('input[name=def]:checked') || {}).value;
+  const body = { name, name_he: nameHe, place, themes, default: themes.includes(def) ? def : themes[0],
+    lists: [...document.querySelectorAll('.list:checked')].map(c => c.value), screensaver: $('saver').checked,
+    block_google: $('saver').checked && $('blockGoogle').checked, dns: $('dns').checked, dry: $('dry').checked };
+  const r = await post('/api/run', body);
+  if (r.error) { msg('runMsg', r.error, 'err'); return; }
+  $('run').disabled = true; msg('runMsg', body.dry ? 'ניסיון בלבד…' : 'מתקין…'); follow();
+};
+$('restore').onclick = async () => {
+  if (!confirm('להחזיר את המקרן למצב שלפני ההתקנה?')) return;
+  const r = await post('/api/restore');
+  if (r.error) { msg('runMsg', r.error, 'err'); return; }
+  msg('runMsg', 'מחזיר…'); follow();
+};
+
+async function follow() {
+  let st;
+  try { st = await (await fetch('/api/state')).json(); } catch (e) { setTimeout(follow, 2000); return; }
+  const log = $('log'); log.style.display = 'block'; log.innerHTML = '';
+  for (const l of st.log) { const d = document.createElement('div'); d.className = l.kind; d.textContent = (l.kind === 'step' ? '' : l.t + '  ') + l.text; log.append(d); }
+  log.scrollTop = log.scrollHeight;
+  if (st.running) { setTimeout(follow, 1000); return; }
+  $('run').disabled = false;
+  if (st.done) { $('s5').classList.add('ok'); msg('runMsg', 'הסתיים ✓', 'ok'); load(); }
+  else if (st.error) msg('runMsg', 'נעצר: ' + st.error, 'err');
+}
+
+load().catch(() => $('device').textContent = 'לא מצליח לדבר עם המקרן: לבדוק שהטלפון על אותו Wi-Fi');
+fetch('/api/state').then(r => r.json()).then(st => { if (st.running) { $('s5').classList.remove('off'); follow(); } });
+</script>
+</body>
+</html>

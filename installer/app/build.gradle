@@ -1,0 +1,51 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.gathin.kit'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.gathin.kit'
+        // Wireless debugging with a pairing code is Android 11 (API 30) and later.
+        minSdk 30
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Installed by hand through the Downloader app, not through a store: the debug key is enough.
+            signingConfig signingConfigs.debug
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+        resources {
+            excludes += ['META-INF/versions/9/OSGI-INF/MANIFEST.MF']
+        }
+    }
+    // The themes and the launcher are packed into assets by pack.py; images and the APK are already compressed.
+    androidResources {
+        noCompress 'apk', 'jpg', 'png', 'webp', 'wav', 'ttf'
+    }
+    lint {
+        abortOnError false
+    }
+}
+
+dependencies {
+    implementation 'com.github.MuntashirAkon:libadb-android:3.1.1'
+    implementation 'com.github.MuntashirAkon:sun-security-android:1.1'
+    implementation 'org.conscrypt:conscrypt-android:2.5.3'
+    implementation 'com.google.zxing:core:3.5.3'
+}

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The TV launcher's banner for the install app: a blue card with a phone and a sparkle. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:startColor="#FF3C78FF" android:endColor="#FF7A3CDC" android:angle="315" />
+            <size android:width="320dp" android:height="180dp" />
+        </shape>
+    </item>
+    <item android:gravity="center" android:width="40dp" android:height="70dp">
+        <shape android:shape="rectangle">
+            <corners android:radius="8dp" />
+            <stroke android:width="5dp" android:color="#FFFFFFFF" />
+        </shape>
+    </item>
+</layer-list>

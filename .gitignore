@@ -1,0 +1,9 @@
+out/
+installer/.gradle/
+installer/build/
+installer/app/build/
+installer/local.properties
+installer/app/src/main/assets/library/
+installer/app/src/main/assets/debloat/
+installer/app/src/main/assets/launcher.apk
+__pycache__/
