@@ -323,8 +323,11 @@ final class Kit implements WebServer.Handler {
     private void pushTheme(String slot, String target, JSONObject o, JSONObject place) throws Exception {
         String base = FILES + (target.isEmpty() ? "" : "/themes/" + target);
         String uri = URI + (target.isEmpty() ? "" : "/themes/" + target);
-        sh("mkdir -p " + base + "/wallpapers " + base + "/art; rm -f " + base + "/wallpapers/* " + base + "/art/* 2>/dev/null; "
-                + "content delete --uri " + uri + "/wallpapers 2>/dev/null");
+        // Folders the shell made can't be written by the launcher on Android 12 (EACCES): they go, and the launcher
+        // makes its own on the first file. Everything in them is sent again below.
+        String stale = base + "/wallpapers " + base + "/art" + (target.isEmpty() ? "" : " " + FILES + "/themes " + base);
+        sh("for d in " + stale + "; do [ -d \"$d\" ] && [ \"$(stat -c %U \"$d\")\" = shell ] && rm -rf \"$d\"; done; "
+                + "rm -f " + base + "/wallpapers/* " + base + "/art/* 2>/dev/null; content delete --uri " + uri + "/wallpapers 2>/dev/null; true");
         List<String> items = new ArrayList<>();
         for (String name : THEME_FILES) if (exists("library/" + slot + "/" + name)) items.add(name);
         for (String sub : new String[]{"wallpapers", "art"}) {
@@ -344,7 +347,8 @@ final class Kit implements WebServer.Handler {
 
     private static String writeCommand(String base, String uri, String rel) {
         return "rm -f " + base + "/" + rel + " 2>/dev/null; { o=$(content write --uri " + uri + "/" + rel + " < " + TMP
-                + " 2>&1) && case \"$o\" in *'Unsupported operation'*) false ;; esac; } || cp " + TMP + " " + base + "/" + rel
+                + " 2>&1); case \"$o\" in *Exception*|*Error*|*'Unsupported operation'*) false ;; esac; } || { mkdir -p "
+                + (base + "/" + rel).replaceAll("/[^/]*$", "") + " 2>/dev/null; cp " + TMP + " " + base + "/" + rel + "; }"
                 + "; rm -f " + TMP;
     }
 
