@@ -47,7 +47,12 @@ try {
     if ($stick) {
         Copy-Item T:\phone-kit\out\FormovieKit.apk ($stick.Root + 'TV-Install.apk') -Force
         $kitOnStick = Join-Path $stick.Root 'ערכה-לחבר\מערכת'
-        if (Test-Path $kitOnStick) { Copy-Item 'T:\ערכה-לחבר\מערכת\launcher.apk' (Join-Path $kitOnStick 'launcher.apk') -Force }
+        if (Test-Path $kitOnStick) {
+            Copy-Item 'T:\ערכה-לחבר\מערכת\launcher.apk' (Join-Path $kitOnStick 'launcher.apk') -Force
+            # The computer editor and wizard too, so the stick's kit is never older than the one here.
+            Copy-Item T:\wallpaper-editor\editor.html, T:\wallpaper-editor\editor.py, T:\wallpaper-editor\wizard.html, T:\wallpaper-editor\wizard.py 'T:\ערכה-לחבר\מערכת\editor\' -Force
+            Copy-Item 'T:\ערכה-לחבר\מערכת\editor\*' (Join-Path $kitOnStick 'editor') -Recurse -Force
+        }
         Say ('USB stick ' + $stick.Name + ': updated')
     }
     Say 'done'
