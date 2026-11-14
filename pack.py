@@ -25,7 +25,9 @@ def main():
     # Where the installer looks for a newer version of itself (Kit.SITES): the GitHub Pages site deploy.py uploads to,
     # from pages-site.json (git-ignored); site.txt is git-ignored too.
     site_file = os.path.join(HERE, "pages-site.json")
-    site = "https://%s.github.io" % json.load(open(site_file, encoding="utf-8"))["user"].strip().lower()         if os.path.isfile(site_file) else ""
+    sys.path.insert(0, HERE)
+    from deploy import pages_site
+    site = pages_site(site_file)[0] if os.path.isfile(site_file) else ""
     open(os.path.join(ASSETS, "site.txt"), "w", encoding="utf-8").write(site)
     size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(ASSETS) for f in fs)
     slots = sorted(n for n in os.listdir(os.path.join(ASSETS, "library")) if os.path.isdir(os.path.join(ASSETS, "library", n)))

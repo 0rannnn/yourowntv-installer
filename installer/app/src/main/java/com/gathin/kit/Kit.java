@@ -241,6 +241,8 @@ final class Kit implements WebServer.Handler {
             String want = online.optString("sha256");
             if (want.isEmpty() || want.equalsIgnoreCase(sha256(new File(context.getApplicationInfo().sourceDir)))) return false;
             status.accept("יש גרסה חדשה של המתקין, מורידה…");
+            say("גרסה חדשה של המתקין מ-" + site + " (" + online.optString("built") + ")", "info");
+            flushLog();
             File apk = new File(context.getExternalFilesDir(null), "update.apk");
             try (InputStream in = open(site + "/tv.apk", 20_000); OutputStream out = new java.io.FileOutputStream(apk)) {
                 byte[] buffer = new byte[65536];

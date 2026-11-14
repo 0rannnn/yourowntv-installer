@@ -2,8 +2,9 @@
 app and no stick or computer: phone-kit/web (index.html, tv.apk) plus version.json, which the installers on TVs
 compare themselves with (Kit.updateIfNewer), and /i, a page that sends Downloader straight to tv.apk.
 
-USER is read from pages-site.json beside this file ({"user": "..."}; git-ignored, so no account name is committed).
-The pages live in phone-kit/pages-repo (git-ignored), a clone of the USER.github.io repository. Every upload is
+USER and REPO are read from pages-site.json beside this file ({"user": "...", "repo": "..."}; git-ignored, so no
+account name is committed); the site is USER.github.io/REPO (or USER.github.io for a repo of that name).
+The pages live in phone-kit/pages-repo (git-ignored), a clone of that repository. Every upload is
 one fresh commit pushed over the last (force), so the repository never grows past one copy of the installer. Git's
 own credential manager signs the push in; nothing secret is read or printed here.
 
@@ -29,9 +30,18 @@ SITE_FILE = os.path.join(HERE, "pages-site.json")
 # /i: Downloader opens the page and follows it to the installer (GitHub Pages has no server-side redirects).
 REDIRECT = """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="robots" content="noindex">
-<meta http-equiv="refresh" content="0; url=/tv.apk"><title>tv.apk</title></head>
-<body><script>location.replace('/tv.apk')</script><a href="/tv.apk">tv.apk</a></body></html>
+<meta http-equiv="refresh" content="0; url=../tv.apk"><title>tv.apk</title></head>
+<body><script>location.replace('../tv.apk')</script><a href="../tv.apk">tv.apk</a></body></html>
 """
+
+
+def pages_site(path):
+    """(the site's address, the repository's address) from pages-site.json."""
+    cfg = json.load(open(path, encoding="utf-8"))
+    user = cfg["user"].strip()
+    repo = (cfg.get("repo") or user.lower() + ".github.io").strip()
+    site = "https://%s.github.io" % user.lower() + ("" if repo.lower() == user.lower() + ".github.io" else "/" + repo)
+    return site, "https://github.com/%s/%s.git" % (user, repo)
 
 
 def git(*args):
@@ -43,8 +53,7 @@ def main():
     if not os.path.isfile(SITE_FILE):
         print('no host: save {"user": "<GitHub username>"} in ' + SITE_FILE)
         return 2
-    user = json.load(open(SITE_FILE, encoding="utf-8"))["user"].strip()
-    site, remote = "https://%s.github.io" % user.lower(), "https://github.com/%s/%s.github.io.git" % (user, user.lower())
+    site, remote = pages_site(SITE_FILE)
     apk = os.path.join(WEB, "tv.apk")
     digest = hashlib.sha256(open(apk, "rb").read()).hexdigest()
     try:
@@ -62,6 +71,7 @@ def main():
         os.makedirs(REPO, exist_ok=True)
         subprocess.run(["git", "init", "-q", "-b", "main", REPO], check=True)
         git("remote", "add", "origin", remote)
+    git("remote", "set-url", "origin", remote)   # pages-site.json may name another repository than last time
     for name in os.listdir(REPO):
         if name != ".git":
             path = os.path.join(REPO, name)
