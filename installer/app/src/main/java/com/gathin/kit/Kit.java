@@ -853,6 +853,12 @@ final class Kit implements WebServer.Handler {
         return names == null ? 0 : names.length;
     }
 
+    /**
+     * Where the phone's photos go: the launcher's own photos theme, themes/images ("Images" / "תמונות"), which Home
+     * makes from the Apple theme the first time it finds photos there (ImagesTheme in the launcher).
+     */
+    private static final List<String> PHOTO_THEMES = java.util.Collections.singletonList("images");
+
     /** The launcher's theme folders on the TV: the base one ("") and every themes/NAME. */
     private List<String> targets() throws Exception {
         List<String> out = new ArrayList<>();
@@ -872,7 +878,7 @@ final class Kit implements WebServer.Handler {
             String name = String.format(Locale.ROOT, "90-photo-%d.jpg", System.currentTimeMillis());
             Files.write(new File(photoDir(), name).toPath(), data);
             if (done && connectNow()) {
-                pushPhoto(targets(), name, data);
+                pushPhoto(PHOTO_THEMES, name, data);
                 say("תמונה נוספה: " + name, "ok");
             }
         }
@@ -956,9 +962,10 @@ final class Kit implements WebServer.Handler {
         if (photos == null) photos = new String[0];
         Arrays.sort(photos);
         List<String> themes = targets();
+        themes.remove("images");   // made by Home from the Apple theme, with the name and place already in it
         for (String photo : photos) {
             List<String> missing = new ArrayList<>();
-            for (String t : themes) {
+            for (String t : PHOTO_THEMES) {
                 String base = FILES + (t.isEmpty() ? "" : "/themes/" + t);
                 boolean has = direct ? providerHas((t.isEmpty() ? "" : "themes/" + t + "/") + "wallpapers/" + photo)
                         : sh("ls " + base + "/wallpapers/" + photo + " 2>/dev/null").contains(photo);
@@ -984,18 +991,6 @@ final class Kit implements WebServer.Handler {
                 cfg.put("location_label", p.getString("place_en", "")).put("location_label_he", p.getString("place_he", ""))
                         .put("weather_lat", Double.parseDouble(p.getString("lat", "0")))
                         .put("weather_lon", Double.parseDouble(p.getString("lon", "0")));
-            }
-            JSONObject moods = cfg.optJSONObject("wallpaper_moods");
-            if (moods != null) {
-                for (java.util.Iterator<String> keys = moods.keys(); keys.hasNext(); ) {
-                    JSONArray group = moods.optJSONArray(keys.next());
-                    if (group == null) continue;
-                    for (String photo : photos) {
-                        boolean has = false;
-                        for (int i = 0; i < group.length(); i++) if (photo.equals(group.optString(i))) has = true;
-                        if (!has) group.put(photo);
-                    }
-                }
             }
             put(prefix + "config.json", cfg.toString(2).getBytes(StandardCharsets.UTF_8), base, uri);
             put(prefix + "theme_revision", UUID.randomUUID().toString().replace("-", "").getBytes(StandardCharsets.UTF_8), base, uri);
