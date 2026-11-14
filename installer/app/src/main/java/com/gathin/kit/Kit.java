@@ -241,9 +241,11 @@ final class Kit implements WebServer.Handler {
             // the start of the new version run apart from it (nohup, in the background), so the new one always opens.
             try {
                 // The system cannot read Android/data (SELinux): the shell copies it to /data/local/tmp, then installs.
-                sh("cp " + path + " /data/local/tmp/kit-update.apk && nohup sh -c 'pm install -r -g /data/local/tmp/kit-update.apk; "
+                // setsid + nohup take it out of this session; the second's wait lets it get away before the session
+                // closes (tested on the projector: without it the job dies with the session).
+                sh("cp " + path + " /data/local/tmp/kit-update.apk && setsid nohup sh -c 'pm install -r -g /data/local/tmp/kit-update.apk; "
                         + "rm -f /data/local/tmp/kit-update.apk; sleep 1; am start -n " + context.getPackageName()
-                        + "/.MainActivity' >/dev/null 2>&1 &", 60_000, 1);
+                        + "/.MainActivity' >/dev/null 2>&1 </dev/null & sleep 1", 60_000, 1);
                 Thread.sleep(60_000);   // the app is replaced well before this ends
             } catch (Exception replacedMidway) {
                 // expected: this app is gone before the command ends
