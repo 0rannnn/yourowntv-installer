@@ -292,7 +292,7 @@ public class MainActivity extends Activity {
     /** The red button asks once more: it takes our home screen off the TV and puts the TV's own back. */
     private void confirmRemove() {
         if (kit.running) return;
-        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("להסיר את הערכה לחלוטין?")
                 .setMessage("מסך הבית שלנו יוסר מהטלוויזיה, וחוזרים מסך הבית המקורי, האפליקציות ששבתו ושומר המסך. "
                         + "השם, המקום והתמונות שנשמרו יימחקו.")
@@ -312,7 +312,10 @@ public class MainActivity extends Activity {
                     }, "kit-remove").start();
                 })
                 .setNegativeButton("ביטול", null)
-                .show();
+                .create();
+        // Cancel is where the focus starts: removing takes a second, deliberate press.
+        dialog.setOnShowListener(d -> dialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE).requestFocus());
+        dialog.show();
     }
 
     /** The bar and the line under it, twice a second; while waiting for the pairing, a look every 3 s. */
