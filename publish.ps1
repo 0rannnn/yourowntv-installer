@@ -8,7 +8,12 @@ $log = 'T:\phone-kit\publish.log'
 $lock = 'T:\phone-kit\publish.lock'
 # A commit made while a publish runs leaves this behind: the running publish then goes round once more.
 $again = 'T:\phone-kit\publish.again'
-function Say($text) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $text" | Out-File $log -Append -Encoding utf8 }
+function Say($text) {
+    # The running build may hold the log for a moment: a few tries, and never a failure over a log line.
+    for ($i = 0; $i -lt 5; $i++) {
+        try { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $text" | Out-File $log -Append -Encoding utf8 -ErrorAction Stop; return } catch { Start-Sleep -Milliseconds 300 }
+    }
+}
 if ((Test-Path $lock) -and ((Get-Date) - (Get-Item $lock).LastWriteTime).TotalMinutes -lt 20) {
     # Another run is going: it will pick up this commit too, unless it already started building; then run again after.
     Say 'busy: another publish is running; it will run once more for this commit'
