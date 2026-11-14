@@ -2,6 +2,9 @@
 # the launcher, the installer with it inside, online for the Downloader app and the installers' self-update
 # (deploy.py writes version.json), and onto a plugged-in USB stick. One run at a time; the log is publish.log.
 $ErrorActionPreference = 'Continue'
+# The Python steps print Hebrew in UTF-8: read them as UTF-8, so publish.log stays readable.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:PYTHONIOENCODING = 'utf-8'
 $here = $PSScriptRoot
 if (-not (Test-Path T:\)) { subst T: (Split-Path $here -Parent) }
 $log = 'T:\phone-kit\publish.log'
@@ -54,7 +57,9 @@ try {
     foreach ($repo in 'T:\cleanyourtv', 'T:\wallpaper-editor', 'T:\phone-kit') {
         if (git -C $repo remote | Select-String -Quiet '^github$') {
             $env:GIT_TERMINAL_PROMPT = '0'
-            $out = git -C $repo push -q github HEAD:main 2>&1
+            # The launcher keeps its own branch name there: the original project's GitHub jobs only run on main.
+            $branch = if ($repo -eq 'T:\cleanyourtv') { 'oran-projector' } else { 'main' }
+            $out = git -C $repo push -q github ('HEAD:' + $branch) 2>&1
             if ($LASTEXITCODE -eq 0) { Say ('GitHub: ' + (Split-Path $repo -Leaf) + ' pushed') } else { Say ('GitHub: ' + (Split-Path $repo -Leaf) + ' FAILED: ' + $out) }
         }
     }
