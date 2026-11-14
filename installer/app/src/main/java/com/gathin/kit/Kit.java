@@ -718,16 +718,8 @@ final class Kit implements WebServer.Handler {
 
     /** A picture from the phone: checked, made at most 1920x1080, kept here, and put in every theme's wallpapers. */
     void addPhoto(byte[] data) throws Exception {
-        if (data == null || data.length == 0 || data.length > 15_000_000) throw new IllegalArgumentException("תמונה לא תקינה");
-        Bitmap picture = BitmapFactory.decodeByteArray(data, 0, data.length);
-        if (picture == null) throw new IllegalArgumentException("זה לא קובץ תמונה");
-        if (picture.getWidth() > 1920 || picture.getHeight() > 1080) {
-            float k = Math.min(1920f / picture.getWidth(), 1080f / picture.getHeight());
-            picture = Bitmap.createScaledBitmap(picture, Math.round(picture.getWidth() * k), Math.round(picture.getHeight() * k), true);
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            picture.compress(Bitmap.CompressFormat.JPEG, 88, out);
-            data = out.toByteArray();
-        }
+        if (data == null || data.length == 0 || data.length > 16_000_000) throw new IllegalArgumentException("התמונה גדולה מדי (עד 16MB)");
+        data = toWallpaper(data);
         synchronized (work) {
             String name = String.format(Locale.ROOT, "90-photo-%d.jpg", System.currentTimeMillis());
             Files.write(new File(photoDir(), name).toPath(), data);
@@ -739,6 +731,36 @@ final class Kit implements WebServer.Handler {
     }
 
     /** A photo to these themes: sent to the TV once, then put into each theme from there. */
+    /**
+     * Any picture the TV can read (JPEG, PNG, WebP, and HEIC/HEIF from iPhones and Samsungs, which phone browsers often
+     * cannot open themselves) made into a 1920x1080 JPEG, cropped from the middle as a wallpaper fills the screen.
+     * Already 1920x1080 JPEG (the page did it): sent on as it is.
+     */
+    static byte[] toWallpaper(byte[] data) throws java.io.IOException {
+        android.graphics.BitmapFactory.Options bounds = new android.graphics.BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        android.graphics.BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw new IllegalArgumentException("הטלוויזיה לא מצליחה לקרוא את התמונה הזאת");
+        boolean jpeg = data.length > 3 && (data[0] & 0xFF) == 0xFF && (data[1] & 0xFF) == 0xD8;
+        if (jpeg && bounds.outWidth == 1920 && bounds.outHeight == 1080) return data;
+        android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+        opts.inSampleSize = 1;
+        while (bounds.outWidth / (opts.inSampleSize * 2) >= 1920 && bounds.outHeight / (opts.inSampleSize * 2) >= 1080) opts.inSampleSize *= 2;
+        android.graphics.Bitmap src = android.graphics.BitmapFactory.decodeByteArray(data, 0, data.length, opts);
+        if (src == null) throw new IllegalArgumentException("הטלוויזיה לא מצליחה לקרוא את התמונה הזאת");
+        android.graphics.Bitmap out = android.graphics.Bitmap.createBitmap(1920, 1080, android.graphics.Bitmap.Config.ARGB_8888);
+        float k = Math.max(1920f / src.getWidth(), 1080f / src.getHeight());
+        float w = src.getWidth() * k, h = src.getHeight() * k;
+        android.graphics.Canvas canvas = new android.graphics.Canvas(out);
+        canvas.drawBitmap(src, null, new android.graphics.RectF((1920 - w) / 2, (1080 - h) / 2, (1920 + w) / 2, (1080 + h) / 2),
+                new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG));
+        src.recycle();
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        out.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, bytes);
+        out.recycle();
+        return bytes.toByteArray();
+    }
+
     private void pushPhoto(List<String> targets, String name, byte[] data) throws Exception {
         if (targets.isEmpty()) return;
         if (direct) {

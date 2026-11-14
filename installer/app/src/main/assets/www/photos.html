@@ -58,21 +58,27 @@ $('files').onchange = async e => {
   const files = [...e.target.files];
   if (!files.length) return;
   $('bar').style.display = 'block';
-  let sent = 0, failed = 0;
+  let sent = 0, failed = 0, lastError = '';
   for (const f of files) {
     msg('שולח ' + (sent + failed + 1) + ' מתוך ' + files.length + '…');
     try {
-      const blob = await toWallpaper(f);
-      const r = await fetch('/api/photo', { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
-      const j = await r.json();
-      if (!r.ok || j.error) throw new Error(j.error || 'הטלוויזיה לא קיבלה את התמונה');
+      // The browser makes it 1920x1080; a picture it cannot open (HEIC from an iPhone or a Samsung) goes as it is,
+      // and the TV makes it.
+      let blob;
+      try { blob = await toWallpaper(f); } catch (e) { blob = f; }
+      let r;
+      try { r = await fetch('/api/photo', { method: 'POST', headers: { 'Content-Type': blob.type || 'application/octet-stream' }, body: blob }); }
+      catch (e) { throw new Error('אין חיבור לטלוויזיה: לבדוק שהטלפון על אותו Wi-Fi'); }
+      let j = {};
+      try { j = await r.json(); } catch (e) {}
+      if (!r.ok || j.error) throw new Error(j.error || 'הטלוויזיה לא קיבלה את התמונה (' + r.status + ')');
       sent++;
       const im = document.createElement('img'); im.src = URL.createObjectURL(blob); $('grid').prepend(im);
-    } catch (err) { failed++; }
+    } catch (err) { failed++; lastError = (f.name ? f.name + ': ' : '') + err.message; }
     $('fill').style.width = Math.round((sent + failed) / files.length * 100) + '%';
   }
   e.target.value = '';
-  if (failed) msg(sent + ' תמונות נשלחו, ' + failed + ' לא הצליחו', 'err');
+  if (failed) msg(sent + ' תמונות נשלחו, ' + failed + ' לא הצליחו. ' + lastError, 'err');
   else msg('✓ ' + sent + ' תמונות נשלחו לטלוויזיה', 'ok');
 };
 </script>
