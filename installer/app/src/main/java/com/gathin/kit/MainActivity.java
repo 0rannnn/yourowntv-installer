@@ -80,6 +80,24 @@ public class MainActivity extends Activity {
         }
     };
 
+    /**
+     * During the countdown any press but OK stops the update that was about to start (the first press on a TV may only
+     * wake the focus, so focus alone is not enough); Down goes straight to the red button.
+     */
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+        int key = event.getKeyCode();
+        if (autoLeft > 0 && event.getAction() == android.view.KeyEvent.ACTION_DOWN
+                && key != android.view.KeyEvent.KEYCODE_DPAD_CENTER && key != android.view.KeyEvent.KEYCODE_ENTER) {
+            autoLeft = 0;
+            handler.removeCallbacks(countdown);
+            status.setText("העדכון בוטל. \"התקן עכשיו\" מעדכן, הכפתור האדום מסיר את הערכה.");
+            if (key == android.view.KeyEvent.KEYCODE_DPAD_DOWN) remove.requestFocus();
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
     /** Whether our launcher is on this TV already (then opening this app updates it, after a short countdown). */
     private boolean launcherInstalled() {
         try {
