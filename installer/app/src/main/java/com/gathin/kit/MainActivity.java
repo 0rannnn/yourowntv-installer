@@ -65,6 +65,30 @@ public class MainActivity extends Activity {
     private ObjectAnimator slide;
     /** The setup after the install (name, place, photos) has been opened. */
     private static boolean setupStarted;
+    /** Seconds before the update starts by itself on a TV that already has the launcher; 0 when none is pending. */
+    private int autoLeft;
+    private final Runnable countdown = new Runnable() {
+        @Override
+        public void run() {
+            if (autoLeft <= 0 || kit.running || kit.done || isFinishing()) return;
+            status.setText("מעדכן את מסך הבית בעוד " + autoLeft + "…  (להסרה: הכפתור האדום למטה)");
+            if (--autoLeft == 0) {
+                pressed();
+                return;
+            }
+            handler.postDelayed(this, 1000);
+        }
+    };
+
+    /** Whether our launcher is on this TV already (then opening this app updates it, after a short countdown). */
+    private boolean launcherInstalled() {
+        try {
+            getPackageManager().getPackageInfo("com.gathin.tvhome", 0);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
     private String nameEn, nameHe, placeEn, placeHe;
     private double lat, lon;
 
@@ -145,6 +169,12 @@ public class MainActivity extends Activity {
         remove.setBackground(red);
         remove.setPadding(px(36), px(10), px(36), px(10));
         remove.setOnFocusChangeListener((v, focused) -> {
+            // Choosing the red button stops the update that was about to start by itself.
+            if (focused && autoLeft > 0) {
+                autoLeft = 0;
+                handler.removeCallbacks(countdown);
+                status.setText("העדכון בוטל. לחיצה על הכפתור האדום מסירה את הערכה.");
+            }
             red.setColor(focused ? 0xFFFF3B30 : 0xFFD70015);
             red.setStroke(px(3), focused ? Color.WHITE : 0x00FFFFFF);
             v.animate().scaleX(focused ? 1.06f : 1f).scaleY(focused ? 1.06f : 1f).setDuration(150).start();
@@ -191,16 +221,24 @@ public class MainActivity extends Activity {
         // Opening the app is the press: the install starts by itself a moment after the screen is up (the button stays
         // for trying again).
         if (!kit.running && !kit.done && !waiting) {
-            status.setText("ההתקנה מתחילה מעצמה…");
             status.setTextColor(0xFFC9CDD6);
-            handler.postDelayed(() -> {
-                if (!kit.running && !kit.done && !isFinishing()) pressed();
-            }, 700);
+            if (launcherInstalled()) {
+                // Already on this TV: a few seconds to choose the red button instead of the update.
+                autoLeft = 6;
+                handler.post(countdown);
+            } else {
+                status.setText("ההתקנה מתחילה מעצמה…");
+                handler.postDelayed(() -> {
+                    if (!kit.running && !kit.done && !isFinishing()) pressed();
+                }, 700);
+            }
         }
     }
 
     /** "Install now": connect, and go; not connected yet, show the one-time pairing and start once it is done. */
     private void pressed() {
+        autoLeft = 0;
+        handler.removeCallbacks(countdown);
         if (kit.running) return;
         if (kit.done && kit.removed) {
             kit.removed = false;
