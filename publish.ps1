@@ -43,16 +43,30 @@ try {
     Copy-Item T:\phone-kit\out\FormovieKit.apk T:\phone-kit\web\tv.apk -Force
     & T:\cleanyourtv\tools\venv\Scripts\python.exe -I T:\phone-kit\deploy.py *>&1 | Out-File $log -Append -Encoding utf8
     if ($LASTEXITCODE -eq 0) { Say 'online' } else { Say 'FAILED: the upload was refused (see the line above); the link keeps the last version' }
+    # The install kit on this computer: the newest editor and wizard, and its one-file copy (ערכה-לחבר.zip).
+    Copy-Item T:\wallpaper-editor\editor.html, T:\wallpaper-editor\editor.py, T:\wallpaper-editor\wizard.html, T:\wallpaper-editor\wizard.py 'T:\ערכה-לחבר\מערכת\editor\' -Force
+    & T:\cleanyourtv\tools\venv\Scripts\python.exe -I T:\phone-kit\make_zip.py *>&1 | Out-File $log -Append -Encoding utf8
+    Say 'install kit updated'
+    # The TVs at home that have the launcher (wallpaper-editor\tvs.json): the new launcher and setup app, settings kept.
+    & T:\cleanyourtv\tools\venv\Scripts\python.exe -I T:\phone-kit\update_tvs.py *>&1 | Out-File $log -Append -Encoding utf8
+    Say 'TVs at home checked'
+    # The source of all three projects to their private GitHub copies (the remote named github in each).
+    foreach ($repo in 'T:\cleanyourtv', 'T:\wallpaper-editor', 'T:\phone-kit') {
+        if (git -C $repo remote | Select-String -Quiet '^github$') {
+            $env:GIT_TERMINAL_PROMPT = '0'
+            $out = git -C $repo push -q github HEAD:main 2>&1
+            if ($LASTEXITCODE -eq 0) { Say ('GitHub: ' + (Split-Path $repo -Leaf) + ' pushed') } else { Say ('GitHub: ' + (Split-Path $repo -Leaf) + ' FAILED: ' + $out) }
+        }
+    }
     $stick = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Name -notin @('C', 'T') -and (Test-Path ($_.Root + 'TV-Install.apk')) } | Select-Object -First 1
     if ($stick) {
         Copy-Item T:\phone-kit\out\FormovieKit.apk ($stick.Root + 'TV-Install.apk') -Force
         $kitOnStick = Join-Path $stick.Root 'ערכה-לחבר\מערכת'
         if (Test-Path $kitOnStick) {
             Copy-Item 'T:\ערכה-לחבר\מערכת\launcher.apk' (Join-Path $kitOnStick 'launcher.apk') -Force
-            # The computer editor and wizard too, so the stick's kit is never older than the one here.
-            Copy-Item T:\wallpaper-editor\editor.html, T:\wallpaper-editor\editor.py, T:\wallpaper-editor\wizard.html, T:\wallpaper-editor\wizard.py 'T:\ערכה-לחבר\מערכת\editor\' -Force
             Copy-Item 'T:\ערכה-לחבר\מערכת\editor\*' (Join-Path $kitOnStick 'editor') -Recurse -Force
         }
+        Copy-Item 'T:\ערכה-לחבר.zip' ($stick.Root + 'ערכה-לחבר.zip') -Force
         Say ('USB stick ' + $stick.Name + ': updated')
     }
     Say 'done'
