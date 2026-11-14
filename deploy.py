@@ -53,6 +53,15 @@ def main():
         import hashlib, time
         apk = os.path.join(WEB, "tv.apk")
         digest = hashlib.sha256(open(apk, "rb").read()).hexdigest()
+        # Every deploy costs the Netlify account credits: an installer that is already online is not sent again.
+        try:
+            online = json.loads(urllib.request.urlopen(site["url"].rstrip("/") + "/version.json?t=%d" % time.time(),
+                                                       timeout=15).read().decode("utf-8"))
+            if online.get("sha256") == digest:
+                print("unchanged: this installer is already online")
+                return 0
+        except Exception:
+            pass
         json.dump({"sha256": digest, "size": os.path.getsize(apk), "built": time.strftime("%Y-%m-%d %H:%M")},
                   open(os.path.join(WEB, "version.json"), "w", encoding="utf-8"))
         buf = io.BytesIO()

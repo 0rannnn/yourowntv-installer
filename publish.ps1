@@ -23,6 +23,9 @@ if ((Test-Path $lock) -and ((Get-Date) - (Get-Item $lock).LastWriteTime).TotalMi
 Set-Content -Path $lock -Value (Get-Date)
 try {
   do {
+    # A minute's wait first: commits made close together (often several, in the three repositories) go up as one
+    # upload, which saves the Netlify account's deploy credits.
+    Start-Sleep -Seconds 60
     Remove-Item $again -Force -ErrorAction SilentlyContinue
     Say '=== publish'
     $env:JAVA_HOME = "$env:LOCALAPPDATA\Programs\temurin17\jdk-17.0.20.1+1"
@@ -39,7 +42,7 @@ try {
     if (-not (Test-Path T:\phone-kit\out\FormovieKit.apk)) { throw 'the installer did not build' }
     Copy-Item T:\phone-kit\out\FormovieKit.apk T:\phone-kit\web\tv.apk -Force
     & T:\cleanyourtv\tools\venv\Scripts\python.exe -I T:\phone-kit\deploy.py *>&1 | Out-File $log -Append -Encoding utf8
-    Say 'online'
+    if ($LASTEXITCODE -eq 0) { Say 'online' } else { Say 'FAILED: the upload was refused (see the line above); the link keeps the last version' }
     $stick = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Name -notin @('C', 'T') -and (Test-Path ($_.Root + 'TV-Install.apk')) } | Select-Object -First 1
     if ($stick) {
         Copy-Item T:\phone-kit\out\FormovieKit.apk ($stick.Root + 'TV-Install.apk') -Force
