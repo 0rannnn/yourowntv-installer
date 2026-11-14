@@ -49,6 +49,12 @@ def main():
                         raise
             site = {"id": made["id"], "url": made.get("ssl_url") or made.get("url")}
             json.dump(site, open(SITE_FILE, "w", encoding="utf-8"), indent=2)
+        # version.json: what the installers on TVs compare themselves with (Kit.updateIfNewer).
+        import hashlib, time
+        apk = os.path.join(WEB, "tv.apk")
+        digest = hashlib.sha256(open(apk, "rb").read()).hexdigest()
+        json.dump({"sha256": digest, "size": os.path.getsize(apk), "built": time.strftime("%Y-%m-%d %H:%M")},
+                  open(os.path.join(WEB, "version.json"), "w", encoding="utf-8"))
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             for name in os.listdir(WEB):

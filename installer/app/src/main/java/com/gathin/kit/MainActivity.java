@@ -56,7 +56,7 @@ public class MainActivity extends Activity {
     private TextView status, percent, title;
     private ProgressBar bar;
     private View barRow;
-    private Button go;
+    private Button go, remove;
     private LinearLayout pairing;
     private volatile boolean checking;
     private long lastCheck;
@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
         title = line("התקנת מסך הבית", 36, Color.WHITE, true);
         title.setGravity(Gravity.CENTER);
         root.addView(title);
-        TextView sub = line("לוחצים על הכפתור, והכול מותקן לבד. לא לכבות את הטלוויזיה עד הסוף.", 18, 0xFFC9CDD6, false);
+        TextView sub = line("הכול מותקן לבד, תוך כמה שניות. לא לכבות את הטלוויזיה עד הסוף.", 18, 0xFFC9CDD6, false);
         sub.setGravity(Gravity.CENTER);
         root.addView(sub);
 
@@ -133,6 +133,28 @@ public class MainActivity extends Activity {
         status = line("", 18, 0xFF30D158, false);
         status.setGravity(Gravity.CENTER);
         root.addView(status);
+
+        // The red button: our home screen off this TV and the TV as it was (asks first).
+        remove = new Button(this);
+        remove.setText("הסרת הערכה לחלוטין");
+        remove.setAllCaps(false);
+        remove.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        remove.setTypeface(Typeface.DEFAULT_BOLD);
+        remove.setTextColor(Color.WHITE);
+        GradientDrawable red = pill(0xFFD70015);
+        remove.setBackground(red);
+        remove.setPadding(px(36), px(10), px(36), px(10));
+        remove.setOnFocusChangeListener((v, focused) -> {
+            red.setColor(focused ? 0xFFFF3B30 : 0xFFD70015);
+            red.setStroke(px(3), focused ? Color.WHITE : 0x00FFFFFF);
+            v.animate().scaleX(focused ? 1.06f : 1f).scaleY(focused ? 1.06f : 1f).setDuration(150).start();
+        });
+        remove.setOnClickListener(v -> confirmRemove());
+        LinearLayout.LayoutParams removeLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        removeLp.topMargin = px(26);
+        removeLp.gravity = Gravity.CENTER_HORIZONTAL;
+        root.addView(remove, removeLp);
         if (server == null) status.setText("לא הצלחתי לפתוח את השרת. לסגור את האפליקציה ולפתוח שוב.");
 
         // Only when the TV has not allowed this kit yet: the phone pairs it once.
@@ -180,6 +202,11 @@ public class MainActivity extends Activity {
     /** "Install now": connect, and go; not connected yet, show the one-time pairing and start once it is done. */
     private void pressed() {
         if (kit.running) return;
+        if (kit.done && kit.removed) {
+            kit.removed = false;
+            kit.done = false;
+            setupStarted = false;
+        }
         if (kit.done) {
             // Done: the button opens the new home.
             startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -189,6 +216,8 @@ public class MainActivity extends Activity {
         status.setTextColor(0xFFC9CDD6);
         new Thread(() -> {
             boolean ok = kit.connectNow();
+            // A newer installer online (every commit publishes one): it replaces this app and starts again by itself.
+            if (ok && kit.updateIfNewer(text -> handler.post(() -> status.setText(text)))) return;
             handler.post(() -> {
                 if (ok) {
                     waiting = false;
@@ -202,6 +231,32 @@ public class MainActivity extends Activity {
                 }
             });
         }, "kit-go").start();
+    }
+
+    /** The red button asks once more: it takes our home screen off the TV and puts the TV's own back. */
+    private void confirmRemove() {
+        if (kit.running) return;
+        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("להסיר את הערכה לחלוטין?")
+                .setMessage("מסך הבית שלנו יוסר מהטלוויזיה, וחוזרים מסך הבית המקורי, האפליקציות ששבתו ושומר המסך. "
+                        + "השם, המקום והתמונות שנשמרו יימחקו.")
+                .setPositiveButton("הסר", (d, w) -> {
+                    title.setText("מסיר את הערכה…");
+                    status.setText("מתחבר לטלוויזיה…");
+                    new Thread(() -> {
+                        boolean ok = kit.connectNow();
+                        handler.post(() -> {
+                            if (ok) kit.startRemove();
+                            else {
+                                waiting = false;
+                                pairing.setVisibility(View.VISIBLE);
+                                status.setText("צריך קודם לאשר את החיבור בטלוויזיה, ואז ללחוץ שוב");
+                            }
+                        });
+                    }, "kit-remove").start();
+                })
+                .setNegativeButton("ביטול", null)
+                .show();
     }
 
     /** The bar and the line under it, twice a second; while waiting for the pairing, a look every 3 s. */
@@ -232,6 +287,11 @@ public class MainActivity extends Activity {
                 go.setText("מתקין…");
                 status.setTextColor(0xFFC9CDD6);
                 status.setText(kit.step + "\n" + last);
+            } else if (kit.done && kit.removed) {
+                title.setText("✓ הערכה הוסרה");
+                go.setText("התקן מחדש");
+                status.setTextColor(0xFF30D158);
+                status.setText("הטלוויזיה חזרה למסך הבית המקורי. אפשר להסיר גם את האפליקציה הזאת.");
             } else if (kit.done) {
                 if (!setupStarted) {
                     // A moment on 100/100, then the setup: name, place, photos.

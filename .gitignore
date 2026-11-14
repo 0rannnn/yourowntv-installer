@@ -9,3 +9,5 @@ installer/app/src/main/assets/launcher.apk
 __pycache__/
 web/
 web-site.json
+publish.log
+publish.lock

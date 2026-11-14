@@ -57,6 +57,8 @@ final class Kit implements WebServer.Handler {
     volatile String error, step = "";
     /** How far the run is, 0 to 100, for the bar on the TV and on the phone. */
     volatile int progress;
+    /** The last run was the red button's removal (the screen then says so, with no setup after it). */
+    volatile boolean removed;
     /** Theme files sent so far and in all, for the bar while the themes go on. */
     private int filesDone, filesTotal;
     final List<String[]> log = new ArrayList<>();
@@ -189,6 +191,95 @@ final class Kit implements WebServer.Handler {
         }
     }
 
+    /** The red button: everything of ours off this TV, the TV's own home and settings back (removeAll). */
+    synchronized boolean startRemove() {
+        if (running) return false;
+        try {
+            start(new JSONObject().put("remove", true), false);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // ---- self-update: the installer on the stick or from Downloader may be older than the one online ----------
+
+    static final String SITE = "https://tv-i.netlify.app";
+
+    /**
+     * When the installer online (SITE/version.json, written by deploy.py on every commit) is not this one, it is
+     * downloaded and installed over this app, which then starts again by itself; returns true then (this app is about
+     * to be replaced). Any problem (no internet, no connection to the TV) just carries on with this version.
+     */
+    boolean updateIfNewer(java.util.function.Consumer<String> status) {
+        try {
+            JSONObject online = new JSONObject(new String(fetch(SITE + "/version.json", 8_000), StandardCharsets.UTF_8));
+            String want = online.optString("sha256");
+            if (want.isEmpty() || want.equalsIgnoreCase(sha256(new File(context.getApplicationInfo().sourceDir)))) return false;
+            status.accept("יש גרסה חדשה של המתקין, מורידה…");
+            File apk = new File(context.getExternalFilesDir(null), "update.apk");
+            try (InputStream in = open(SITE + "/tv.apk", 20_000); OutputStream out = new java.io.FileOutputStream(apk)) {
+                byte[] buffer = new byte[65536];
+                long total = Math.max(1, online.optLong("size", 20_000_000)), got = 0;
+                int n, last = -1;
+                while ((n = in.read(buffer)) > 0) {
+                    out.write(buffer, 0, n);
+                    got += n;
+                    int pct = (int) Math.min(100, got * 100 / total);
+                    if (pct != last && pct % 5 == 0) {
+                        last = pct;
+                        status.accept("מוריד את הגרסה החדשה של המתקין… " + pct + "/100");
+                    }
+                }
+            }
+            if (!want.equalsIgnoreCase(sha256(apk))) return false;   // a broken download: keep this version
+            if (!connectNow()) return false;
+            status.accept("מתקין את הגרסה החדשה של המתקין…");
+            String path = "/sdcard/Android/data/" + context.getPackageName() + "/files/update.apk";
+            // One shell command: the install replaces (and stops) this app, and the shell then starts the new one.
+            try {
+                // The system cannot read Android/data (SELinux): the shell copies it to /data/local/tmp, then installs.
+                sh("cp " + path + " /data/local/tmp/kit-update.apk && pm install -r -g /data/local/tmp/kit-update.apk; "
+                        + "rm -f /data/local/tmp/kit-update.apk; am start -n " + context.getPackageName() + "/.MainActivity", 120_000, 1);
+            } catch (Exception replacedMidway) {
+                // expected: this app is gone before the command ends
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static InputStream open(String address, int timeoutMs) throws IOException {
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(address).openConnection();
+        c.setConnectTimeout(timeoutMs);
+        c.setReadTimeout(timeoutMs);
+        c.setUseCaches(false);
+        return c.getInputStream();
+    }
+
+    private static byte[] fetch(String address, int timeoutMs) throws IOException {
+        try (InputStream in = open(address + "?t=" + System.currentTimeMillis(), timeoutMs)) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int n;
+            while ((n = in.read(buffer)) > 0) out.write(buffer, 0, n);
+            return out.toByteArray();
+        }
+    }
+
+    private static String sha256(File file) throws Exception {
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        try (InputStream in = new java.io.FileInputStream(file)) {
+            byte[] buffer = new byte[65536];
+            int n;
+            while ((n = in.read(buffer)) > 0) md.update(buffer, 0, n);
+        }
+        StringBuilder hex = new StringBuilder();
+        for (byte b : md.digest()) hex.append(String.format(Locale.ROOT, "%02x", b));
+        return hex.toString();
+    }
+
     /** Whether this TV's own ADB answers now (paired before, or its network debugging port is open). */
     boolean connectNow() {
         try {
@@ -216,11 +307,14 @@ final class Kit implements WebServer.Handler {
         new Thread(() -> {
             try {
                 say("מתחיל: " + Build.MANUFACTURER + " " + Build.MODEL + ", Android " + Build.VERSION.RELEASE, "info");
-                if (restore) restore();
+                removed = options.optBoolean("remove");
+                if (removed) removeAll();
+                else if (restore) restore();
                 else install(options);
                 done = true;
                 progress = 100;
-                say(restore ? "המקרן הוחזר למצב שלפני ההתקנה" : "ההתקנה הסתיימה", "ok");
+                say(options.optBoolean("remove") ? "הערכה הוסרה, הטלוויזיה חזרה למסך הבית המקורי"
+                        : restore ? "המקרן הוחזר למצב שלפני ההתקנה" : "ההתקנה הסתיימה", "ok");
             } catch (Throwable e) {
                 error = e.getMessage() == null ? e.toString() : e.getMessage();
                 say(error, "error");
@@ -671,6 +765,60 @@ final class Kit implements WebServer.Handler {
         if (dns.length > 1 && !dns[1].isEmpty() && !dns[1].equals("null")) sh("settings put global private_dns_specifier " + dns[1]);
         String home = state.optString("home");
         if (home.contains("/") && !home.contains(PKG)) sh("cmd package set-home-activity --user 0 " + home);
+    }
+
+    /**
+     * The red button: our launcher off the TV and the TV as it was. From this installer's backup when it has one
+     * (the apps it switched off back on, the old screensaver, DNS and home); without one, the TV's own home, setup and
+     * screensaver apps are switched on again. Then our Settings-button helper is taken off the accessibility list,
+     * the launcher is uninstalled and the TV's own home is made the home. Nothing else of the TV is touched.
+     */
+    private void removeAll() throws Exception {
+        if (!connectNow()) throw new IllegalStateException("לא מחובר לטלוויזיה");
+        progress = 5;
+        stepTo("מסיר את מסך הבית ומחזיר את הטלוויזיה למצב המקורי");
+        if (latestBackup() != null) {
+            try {
+                restore();
+            } catch (Exception e) {
+                say("הגיבוי לא הוחזר במלואו: " + e.getMessage(), "warn");
+            }
+        }
+        progress = 35;
+        // Whatever the backup says, the TV's own home, its setup app and Google's screensaver are on again.
+        for (String p : new String[]{"com.google.android.apps.tv.launcherx", "com.google.android.tvlauncher",
+                "com.google.android.tungsten.setupwraith", "com.google.android.apps.tv.dreamx"}) {
+            if (sh("pm list packages " + p).contains("package:" + p)) sh("pm enable " + p);
+        }
+        String saver = sh("settings get secure screensaver_components");
+        if (saver.contains(PKG)) sh("settings delete secure screensaver_components");
+        progress = 55;
+        String services = sh("settings get secure enabled_accessibility_services");
+        StringBuilder others = new StringBuilder();
+        for (String s : services.split(":")) {
+            if (s.isEmpty() || s.equals("null") || s.startsWith(PKG + "/")) continue;
+            if (others.length() > 0) others.append(':');
+            others.append(s);
+        }
+        sh(others.length() > 0 ? "settings put secure enabled_accessibility_services " + others
+                : "settings delete secure enabled_accessibility_services");
+        progress = 70;
+        String result = sh("pm uninstall " + PKG, 60_000);
+        say("מסך הבית: " + (result.contains("Success") ? "הוסר" : result), result.contains("Success") ? "ok" : "warn");
+        progress = 85;
+        // The TV's own home becomes the home again (the first HOME activity that is not ours or a setup screen).
+        for (String line : sh("cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.HOME").split("\n")) {
+            String home = line.trim();
+            if (home.contains("/") && !home.contains(PKG) && !home.contains("setup") && !home.contains("Settings")) {
+                sh("cmd package set-home-activity --user 0 " + home);
+                break;
+            }
+        }
+        // Our saved name, place and photos go too: an install after this starts fresh.
+        setup().edit().clear().commit();
+        String[] photos = photoDir().list();
+        if (photos != null) for (String n : photos) new File(photoDir(), n).delete();
+        sh("input keyevent HOME");
     }
 
     private File latestBackup() {
