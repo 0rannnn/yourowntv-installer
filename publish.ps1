@@ -6,14 +6,19 @@ $here = $PSScriptRoot
 if (-not (Test-Path T:\)) { subst T: (Split-Path $here -Parent) }
 $log = 'T:\phone-kit\publish.log'
 $lock = 'T:\phone-kit\publish.lock'
+# A commit made while a publish runs leaves this behind: the running publish then goes round once more.
+$again = 'T:\phone-kit\publish.again'
 function Say($text) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  $text" | Out-File $log -Append -Encoding utf8 }
 if ((Test-Path $lock) -and ((Get-Date) - (Get-Item $lock).LastWriteTime).TotalMinutes -lt 20) {
     # Another run is going: it will pick up this commit too, unless it already started building; then run again after.
-    Say 'busy: another publish is running'
+    Say 'busy: another publish is running; it will run once more for this commit'
+    Set-Content -Path $again -Value (Get-Date)
     exit 0
 }
 Set-Content -Path $lock -Value (Get-Date)
 try {
+  do {
+    Remove-Item $again -Force -ErrorAction SilentlyContinue
     Say '=== publish'
     $env:JAVA_HOME = "$env:LOCALAPPDATA\Programs\temurin17\jdk-17.0.20.1+1"
     $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
@@ -38,6 +43,7 @@ try {
         Say ('USB stick ' + $stick.Name + ': updated')
     }
     Say 'done'
+  } while (Test-Path $again)
 } catch {
     Say ('FAILED: ' + $_)
 } finally {
