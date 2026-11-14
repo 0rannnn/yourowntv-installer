@@ -208,8 +208,9 @@ final class Kit implements WebServer.Handler {
 
     /**
      * When the installer online (SITE/version.json, written by deploy.py on every commit) is not this one, it is
-     * downloaded and installed over this app, which then starts again by itself; returns true then (this app is about
-     * to be replaced). Any problem (no internet, no connection to the TV) just carries on with this version.
+     * downloaded and installed over this app, which then starts again by itself (this call never comes back then).
+     * Returns false when there is nothing newer or anything goes wrong (no internet, no connection to the TV): carry on
+     * with this version.
      */
     boolean updateIfNewer(java.util.function.Consumer<String> status) {
         try {
@@ -236,15 +237,18 @@ final class Kit implements WebServer.Handler {
             if (!connectNow()) return false;
             status.accept("מתקין את הגרסה החדשה של המתקין…");
             String path = "/sdcard/Android/data/" + context.getPackageName() + "/files/update.apk";
-            // One shell command: the install replaces (and stops) this app, and the shell then starts the new one.
+            // The install replaces (and stops) this app, which takes its shell session down with it: the install and
+            // the start of the new version run apart from it (nohup, in the background), so the new one always opens.
             try {
                 // The system cannot read Android/data (SELinux): the shell copies it to /data/local/tmp, then installs.
-                sh("cp " + path + " /data/local/tmp/kit-update.apk && pm install -r -g /data/local/tmp/kit-update.apk; "
-                        + "rm -f /data/local/tmp/kit-update.apk; am start -n " + context.getPackageName() + "/.MainActivity", 120_000, 1);
+                sh("cp " + path + " /data/local/tmp/kit-update.apk && nohup sh -c 'pm install -r -g /data/local/tmp/kit-update.apk; "
+                        + "rm -f /data/local/tmp/kit-update.apk; sleep 1; am start -n " + context.getPackageName()
+                        + "/.MainActivity' >/dev/null 2>&1 &", 60_000, 1);
+                Thread.sleep(60_000);   // the app is replaced well before this ends
             } catch (Exception replacedMidway) {
                 // expected: this app is gone before the command ends
             }
-            return true;
+            return false;   // still here a minute later: the update did not go in, carry on with this version
         } catch (Exception e) {
             return false;
         }
