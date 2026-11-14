@@ -1,7 +1,10 @@
 package com.gathin.kit;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.res.AssetManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Build;
 
 import org.json.JSONArray;
@@ -52,6 +55,10 @@ final class Kit implements WebServer.Handler {
     // What the phone page and the TV screen show while a run goes on.
     volatile boolean running, done;
     volatile String error, step = "";
+    /** How far the run is, 0 to 100, for the bar on the TV and on the phone. */
+    volatile int progress;
+    /** Theme files sent so far and in all, for the bar while the themes go on. */
+    private int filesDone, filesTotal;
     final List<String[]> log = new ArrayList<>();
 
     Kit(Context context) {
@@ -84,6 +91,13 @@ final class Kit implements WebServer.Handler {
                 return WebServer.Response.json("{\"ok\":true}");
             case "/api/state":
                 return WebServer.Response.json(state().toString());
+            case "/photos":
+                return new WebServer.Response(200, "text/html; charset=utf-8", read("www/photos.html"));
+            case "/api/photo":
+                addPhoto(r.body);
+                return WebServer.Response.json("{\"ok\":true,\"count\":" + photoCount() + "}");
+            case "/api/photos":
+                return WebServer.Response.json("{\"count\":" + photoCount() + ",\"ready\":" + done + "}");
             default:
                 return null;
         }
@@ -156,34 +170,100 @@ final class Kit implements WebServer.Handler {
         JSONArray lines = new JSONArray();
         for (String[] line : log) lines.put(new JSONObject().put("t", line[0]).put("kind", line[1]).put("text", line[2]));
         return new JSONObject().put("running", running).put("done", done).put("error", error == null ? JSONObject.NULL : error)
-                .put("step", step).put("log", lines);
+                .put("step", step).put("progress", progress).put("log", lines);
     }
 
     // ---- the run --------------------------------------------------------------------------------------------
 
+    /** The TV's own "install now" button: everything with the usual choices, no phone needed once connected. */
+    synchronized boolean startAuto() {
+        if (running) return false;
+        try {
+            // Every theme from the editor's library, Apple first, our screensaver instead of Google's. No name and no
+            // place built in (this app may be downloaded by anyone): the setup screens after the install ask for them,
+            // and an update puts back what was typed there last time.
+            start(new JSONObject().put("screensaver", true).put("block_google", true).put("default", "apple"), false);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Whether this TV's own ADB answers now (paired before, or its network debugging port is open). */
+    boolean connectNow() {
+        try {
+            if (Adb.get(context).isConnected()) return true;
+        } catch (Throwable ignored) {
+        }
+        // A new connection, with its own time limit (a stuck one is let go, never waited on).
+        return Adb.fresh(context);
+    }
+
     private synchronized void start(JSONObject options, boolean restore) {
         if (running) throw new IllegalStateException("כבר רץ");
         running = true;
+        progress = 1;
         done = false;
         error = null;
         log.clear();
+        unsaved.clear();
+        // A foreground service keeps this app running while the run goes on: Android TV freezes an app that is not
+        // in front, and the install stood still the moment the new home came forward.
+        try {
+            context.startForegroundService(new android.content.Intent(context, InstallService.class));
+        } catch (Throwable ignored) {
+        }
         new Thread(() -> {
             try {
+                say("מתחיל: " + Build.MANUFACTURER + " " + Build.MODEL + ", Android " + Build.VERSION.RELEASE, "info");
                 if (restore) restore();
                 else install(options);
                 done = true;
+                progress = 100;
                 say(restore ? "המקרן הוחזר למצב שלפני ההתקנה" : "ההתקנה הסתיימה", "ok");
             } catch (Throwable e) {
                 error = e.getMessage() == null ? e.toString() : e.getMessage();
                 say(error, "error");
             } finally {
                 running = false;
+                flushLog();
+                try {
+                    context.stopService(new android.content.Intent(context, InstallService.class));
+                } catch (Throwable ignored) {
+                }
             }
         }, "kit-run").start();
     }
 
     synchronized void say(String text, String kind) {
-        log.add(new String[]{new SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(new Date()), kind, text});
+        String[] line = {new SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(new Date()), kind, text};
+        log.add(line);
+        unsaved.add(line);
+    }
+
+    /** Log lines not yet written to the USB stick. */
+    private final List<String[]> unsaved = new ArrayList<>();
+
+    /**
+     * The log so far onto every USB stick in the TV (tv-install-log.txt) and into Downloads, through the shell user,
+     * which may write there: when a run stops somewhere, the stick brings back where and why. Never stops the run.
+     */
+    void flushLog() {
+        StringBuilder text = new StringBuilder();
+        synchronized (this) {
+            if (unsaved.isEmpty()) return;
+            for (String[] l : unsaved) text.append(new SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(new Date()))
+                    .append(' ').append(l[0]).append("  ").append(l[1]).append("  ").append(l[2]).append('\n');
+            unsaved.clear();
+        }
+        try {
+            if (!Adb.get(context).isConnected()) return;
+            String b64 = android.util.Base64.encodeToString(text.toString().getBytes(StandardCharsets.UTF_8), android.util.Base64.NO_WRAP);
+            Adb.get(context).sh("for d in /storage/*-* /sdcard/Download; do [ -d \"$d\" ] && echo '" + b64
+                    + "' | base64 -d >> \"$d/tv-install-log.txt\" 2>/dev/null; done; true", 15_000, 1);
+        } catch (Throwable ignored) {
+            // no stick, or no access: the screen still shows it
+        }
     }
 
     private void stepTo(String name) throws Exception {
@@ -192,17 +272,33 @@ final class Kit implements WebServer.Handler {
         sh("input keyevent WAKEUP");   // the projector sleeps after 10 idle minutes and drops off Wi-Fi
     }
 
+    /** This app back in front: the new home came forward to load its themes, and the install screen goes on top. */
+    private void backInFront() {
+        try {
+            sh("am start -n " + context.getPackageName() + "/.MainActivity", 20_000);
+        } catch (Throwable ignored) {
+        }
+    }
+
     private String sh(String command) throws Exception {
         return Adb.get(context).sh(command);
+    }
+
+    private String sh(String command, long limitMs, int tries) throws Exception {
+        return Adb.get(context).sh(command, limitMs, tries);
+    }
+
+    private String sh(String command, long limitMs) throws Exception {
+        return Adb.get(context).sh(command, limitMs);
     }
 
     private void install(JSONObject o) throws Exception {
         boolean dry = o.optBoolean("dry");
         redirect = "";
+        direct = false;
+        if (!connectNow()) throw new IllegalStateException("לא מחובר: קודם לצמד עם הקוד (שלב 1)");
         tcl = sh("getprop ro.product.brand; getprop ro.product.manufacturer").matches("(?is).*\\bTCL\\b.*");
         if (tcl) say("מצב TCL: השלט של TCL (גלגל השיניים, YouTube) ומסך הבית של Google TV מסודרים לבד", "ok");
-        Adb adb = Adb.get(context);
-        if (!adb.connectSelf()) throw new IllegalStateException("לא מחובר: קודם לצמד עם הקוד (שלב 1)");
         List<String> all = slots();
         List<String> chosen = new ArrayList<>();
         JSONArray picked = o.optJSONArray("themes");
@@ -211,6 +307,7 @@ final class Kit implements WebServer.Handler {
         String def = chosen.contains(o.optString("default")) ? o.optString("default") : chosen.get(0);
         JSONObject place = o.optJSONObject("place");
 
+        progress = 2;
         stepTo("1. גיבוי של המצב הנוכחי");
         File backup = new File(context.getExternalFilesDir(null), "backups/" + new SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.ROOT).format(new Date()));
         if (!backup.mkdirs() && !backup.isDirectory()) throw new IOException("אין מקום לגיבוי");
@@ -223,13 +320,51 @@ final class Kit implements WebServer.Handler {
         write(new File(backup, "state.json"), state.toString(2));
         say("נשמר", "ok");
 
+        progress = 5;
         stepTo("2. התקנת מסך הבית");
         if (dry) say("[ניסיון] מתקין את מסך הבית", "dry");
         else {
-            pushAsset("launcher.apk", "/data/local/tmp/kit.apk");
-            String result = sh("pm install -r -g /data/local/tmp/kit.apk; rm -f /data/local/tmp/kit.apk");
-            if (!result.contains("Success")) throw new IllegalStateException("ההתקנה נכשלה: " + result);
+            // Already on this TV: an update from the stick starts clean, so the old settings and themes go and the
+            // ones from the stick replace them (Android keeps the app's permissions; they are granted again below).
+            if (sh("pm path " + PKG).contains("package:")) {
+                sh("am force-stop " + PKG + "; pm clear " + PKG);
+                say("מסך הבית כבר מותקן: ההגדרות הישנות נמחקו ומוחלפות בחדשות", "info");
+            }
+            pushAsset("launcher.apk", "/data/local/tmp/kit.apk", 5, 28);
+            // The TV installs it now; Google Play Protect (or a maker's own check) may put up a question first and
+            // wait for it. Say so on the screen, creep the bar so it does not look frozen, and stop after 3 minutes
+            // instead of hanging forever.
+            step = "2. מתקין את מסך הבית… אם קפץ חלון אישור (Play Protect), לאשר אותו בשלט";
+            say(step, "info");
+            Thread creep = new Thread(() -> {
+                try {
+                    while (progress < 31) {
+                        Thread.sleep(6000);
+                        progress++;
+                    }
+                } catch (InterruptedException ignored) {
+                }
+            }, "kit-creep");
+            creep.start();
+            String result;
+            try {
+                result = sh("timeout 180 pm install -r -g /data/local/tmp/kit.apk; rm -f /data/local/tmp/kit.apk", 200_000, 2);
+            } finally {
+                creep.interrupt();
+            }
+            if (!result.contains("Success")) {
+                if (result.trim().isEmpty()) throw new IllegalStateException("ההתקנה לא הסתיימה תוך 3 דקות. כנראה הטלוויזיה "
+                        + "מחכה לאישור (Play Protect): ללחוץ אחורה, לאשר את החלון, ואז לנסות שוב");
+                throw new IllegalStateException("ההתקנה נכשלה: " + result);
+            }
+            step = "2. התקנת מסך הבית";
+            // The fast route for the themes: this app may now write them straight through the launcher's provider.
+            sh("pm grant " + context.getPackageName() + " android.permission.WRITE_SECURE_SETTINGS", 20_000);
+            direct = context.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS")
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            say(direct ? "ערכות הנושא נכתבות ישירות (מהיר)" : "ערכות הנושא נשלחות דרך ADB", "info");
         }
+        progress = 32;
         String service = PKG + "/.HomeKeyService";
         String[] setup = {
                 "pm grant " + PKG + " android.permission.BLUETOOTH_CONNECT",
@@ -258,14 +393,23 @@ final class Kit implements WebServer.Handler {
             } else throw new IllegalStateException("מסך הבית החדש לא נקבע כברירת מחדל (" + now + "). עוצרים כאן.");
         }
 
+        progress = 36;
         stepTo("3. ערכות הנושא");
+        filesDone = 0;
+        filesTotal = 0;
+        for (String slot : chosen) filesTotal += themeFiles(slot).size() + 1;
+        filesTotal += themeFiles(def).size() + 1;
         for (String slot : chosen) {
             if (dry) say("[ניסיון] שולח את " + slot, "dry");
             else pushTheme(slot, slot, o, place);
         }
         if (dry) say("[ניסיון] " + def + " גם כערכה הראשית", "dry");
         else pushTheme(def, "", o, place);
-        if (!dry) restartHome();
+        if (!dry) {
+            restartHome();
+            backInFront();
+        }
+        progress = 92;
 
         stepTo("4. השבתת אפליקציות (לא מחיקה)");
         JSONArray lists = o.optJSONArray("lists");
@@ -299,6 +443,7 @@ final class Kit implements WebServer.Handler {
             write(new File(backup, "state.json"), state.toString(2));
         }
 
+        progress = 95;
         stepTo("5. שומר מסך ו-DNS");
         if (o.optBoolean("screensaver", true)) {
             if (dry) say("[ניסיון] שומר המסך שלנו", "dry");
@@ -316,7 +461,14 @@ final class Kit implements WebServer.Handler {
             if (dry) say("[ניסיון] חוסם פרסומות", "dry");
             else sh("settings put global private_dns_specifier dns.adguard-dns.com; settings put global private_dns_mode hostname");
         }
-        if (!dry) sh("input keyevent HOME");
+        if (!dry && setup().getBoolean("saved", false)) {
+            // An update: the launcher started clean, so the name, place and photos from last time go back on.
+            progress = 98;
+            stepTo("6. השם, המקום והתמונות מהפעם הקודמת");
+            applySetup();
+        }
+        // The install screen stays in front: it goes on to the setup (name, place, photos), which opens Home at the end.
+        if (!dry) backInFront();
     }
 
     /** A theme from the assets onto the projector, with the owner's details; slot "" is the base theme. */
@@ -326,30 +478,106 @@ final class Kit implements WebServer.Handler {
         // Folders the shell made can't be written by the launcher on Android 12 (EACCES): they go, and the launcher
         // makes its own on the first file. Everything in them is sent again below.
         String stale = base + "/wallpapers " + base + "/art" + (target.isEmpty() ? "" : " " + FILES + "/themes " + base);
-        sh("for d in " + stale + "; do [ -d \"$d\" ] && [ \"$(stat -c %U \"$d\")\" = shell ] && rm -rf \"$d\"; done; "
-                + "rm -f " + base + "/wallpapers/* " + base + "/art/* 2>/dev/null; content delete --uri " + uri + "/wallpapers 2>/dev/null; true");
+        if (direct) {
+            try {
+                context.getContentResolver().delete(themeUri((target.isEmpty() ? "" : "themes/" + target + "/") + "wallpapers"), null, null);
+            } catch (Exception ignored) {
+            }
+        } else {
+            sh("for d in " + stale + "; do [ -d \"$d\" ] && [ \"$(stat -c %U \"$d\")\" = shell ] && rm -rf \"$d\"; done; "
+                    + "rm -f " + base + "/wallpapers/* " + base + "/art/* 2>/dev/null; content delete --uri " + uri + "/wallpapers 2>/dev/null; true");
+        }
+        List<String> items = themeFiles(slot);
+        String prefix = target.isEmpty() ? "" : "themes/" + target + "/";
+        for (String rel : items) {
+            byte[] data = read("library/" + slot + "/" + rel);
+            if (rel.equals("config.json")) data = personalize(data, o, place);
+            put(prefix + rel, data, base, uri);
+            themeFileDone();
+        }
+        put(prefix + "theme_revision", UUID.randomUUID().toString().replace("-", "").getBytes(StandardCharsets.UTF_8), base, uri);
+        themeFileDone();
+        say("   " + (target.isEmpty() ? "ראשית" : target) + ": " + (items.size() + 1) + " קבצים", "info");
+    }
+
+    // ---- the fast route: the launcher's theme provider, straight from this app ------------------------------
+    /** This app holds WRITE_SECURE_SETTINGS (granted over ADB), so it may use the launcher's theme provider itself. */
+    private volatile boolean direct;
+
+    private android.net.Uri themeUri(String path) {
+        return android.net.Uri.parse(URI + "/" + path);
+    }
+
+    /** One theme file: through the provider when allowed (a local call, milliseconds), else through ADB. */
+    private void put(String path, byte[] data, String base, String uri) throws Exception {
+        if (direct) {
+            try {
+                providerWrite(path, data);
+                return;
+            } catch (Exception e) {
+                say("כתיבה ישירה נכשלה (" + e.getMessage() + "), עובר ל-ADB", "warn");
+                direct = false;
+            }
+        }
+        String rel = path.startsWith("themes/") ? path.substring(path.indexOf('/', 7) + 1) : path;
+        pushBytes(data, TMP);
+        sh(writeCommand(base, uri, rel));
+    }
+
+    private void providerWrite(String path, byte[] data) throws Exception {
+        try (OutputStream out = context.getContentResolver().openOutputStream(themeUri(path), "wt")) {
+            if (out == null) throw new IOException("no provider");
+            out.write(data);
+        }
+    }
+
+    private byte[] providerRead(String path) {
+        try (InputStream in = context.getContentResolver().openInputStream(themeUri(path))) {
+            if (in == null) return null;
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[16384];
+            int n;
+            while ((n = in.read(buffer)) > 0) out.write(buffer, 0, n);
+            return out.toByteArray();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private boolean providerHas(String path) {
+        try (android.os.ParcelFileDescriptor fd = context.getContentResolver().openFileDescriptor(themeUri(path), "r")) {
+            return fd != null && fd.getStatSize() > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** A theme's files in the assets: its settings, fonts and sound, then its wallpapers and art. */
+    private List<String> themeFiles(String slot) throws IOException {
         List<String> items = new ArrayList<>();
         for (String name : THEME_FILES) if (exists("library/" + slot + "/" + name)) items.add(name);
         for (String sub : new String[]{"wallpapers", "art"}) {
             String[] names = assets.list("library/" + slot + "/" + sub);
             if (names != null) for (String n : names) items.add(sub + "/" + n);
         }
-        for (String rel : items) {
-            byte[] data = read("library/" + slot + "/" + rel);
-            if (rel.equals("config.json")) data = personalize(data, o, place);
-            pushBytes(data, TMP);
-            sh(writeCommand(base, uri, rel));
-        }
-        pushBytes(UUID.randomUUID().toString().replace("-", "").getBytes(StandardCharsets.UTF_8), TMP);
-        sh(writeCommand(base, uri, "theme_revision"));
-        say("   " + (target.isEmpty() ? "ראשית" : target) + ": " + (items.size() + 1) + " קבצים", "info");
+        return items;
+    }
+
+    /** One theme file sent: the bar moves through 36 to 90 while the themes go on. */
+    private void themeFileDone() {
+        filesDone++;
+        if (filesTotal > 0) progress = Math.max(progress, 36 + Math.min(54, filesDone * 54 / filesTotal));
     }
 
     private static String writeCommand(String base, String uri, String rel) {
-        return "rm -f " + base + "/" + rel + " 2>/dev/null; { o=$(content write --uri " + uri + "/" + rel + " < " + TMP
+        return writeFrom(base, uri, rel, TMP) + "; rm -f " + TMP;
+    }
+
+    /** The file {@code src} on the TV into a theme, through the launcher's provider (else a plain copy); src is kept. */
+    private static String writeFrom(String base, String uri, String rel, String src) {
+        return "rm -f " + base + "/" + rel + " 2>/dev/null; { o=$(content write --uri " + uri + "/" + rel + " < " + src
                 + " 2>&1); case \"$o\" in *Exception*|*Error*|*'Unsupported operation'*) false ;; esac; } || { mkdir -p "
-                + (base + "/" + rel).replaceAll("/[^/]*$", "") + " 2>/dev/null; cp " + TMP + " " + base + "/" + rel + "; }"
-                + "; rm -f " + TMP;
+                + (base + "/" + rel).replaceAll("/[^/]*$", "") + " 2>/dev/null; cp " + src + " " + base + "/" + rel + "; }";
     }
 
     /** stock_home_redirect: the stock launcher that kept Home (Google TV), or "" when ours is Home. */
@@ -411,7 +639,9 @@ final class Kit implements WebServer.Handler {
         String full = (others.length() > 0 ? others + ":" : "") + PKG + "/.HomeKeyService";
         sh("settings put secure enabled_accessibility_services " + full + "; settings put secure accessibility_enabled 1");
         // With Google TV's Home kept, a Home intent would show launcherx: ours opens directly.
-        if (redirect.isEmpty()) sh("am start -a android.intent.action.MAIN -c android.intent.category.HOME");
+        // Decided by what Android says now: the redirect field is lost if this app restarted since the install.
+        String home = sh("cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1");
+        if (redirect.isEmpty() && home.contains(PKG)) sh("am start -a android.intent.action.MAIN -c android.intent.category.HOME");
         else sh("am start -n " + PKG + "/.MainActivity");
     }
 
@@ -451,26 +681,214 @@ final class Kit implements WebServer.Handler {
         return all[all.length - 1];
     }
 
-    // ---- files ----------------------------------------------------------------------------------------------
+    // ---- after the install: the owner's name, place and photos --------------------------------------------------
+    // The TV's setup screens (MainActivity) ask for the name and the place; the phone's photo page (www/photos.html,
+    // reached by the QR code) sends pictures. Everything is kept in this app as well, so the next update from the
+    // stick (which starts the launcher clean) puts the same name, place and photos back by itself.
 
-    /** Bytes into a file on the projector through the shell user (exec:cat), so the shell can read them back. */
-    private void pushBytes(byte[] data, String remote) throws Exception {
-        AdbStream stream = Adb.get(context).openStream("exec:cat > " + remote);
-        try (OutputStream out = stream.openOutputStream()) {
-            out.write(data);
-            out.flush();
-        }
-        try (InputStream in = stream.openInputStream()) {
-            while (in.read() >= 0) {
-                // wait until cat is done and the stream closes
-            }
-        } catch (IOException ignored) {
-        }
-        stream.close();
+    private static final String SETUP = "setup";
+    /** Serialises the setup's work on the TV (photos arrive from the phone while the TV screen waits). */
+    private final Object work = new Object();
+
+    SharedPreferences setup() {
+        return context.getSharedPreferences(SETUP, Context.MODE_PRIVATE);
     }
 
-    private void pushAsset(String asset, String remote) throws Exception {
-        pushBytes(read(asset), remote);
+    private File photoDir() {
+        File dir = new File(context.getFilesDir(), "photos");
+        if (!dir.isDirectory() && !dir.mkdirs()) return context.getFilesDir();
+        return dir;
+    }
+
+    int photoCount() {
+        String[] names = photoDir().list((d, n) -> n.endsWith(".jpg"));
+        return names == null ? 0 : names.length;
+    }
+
+    /** The launcher's theme folders on the TV: the base one ("") and every themes/NAME. */
+    private List<String> targets() throws Exception {
+        List<String> out = new ArrayList<>();
+        out.add("");
+        for (String n : sh("ls -1 " + FILES + "/themes 2>/dev/null").split("\n")) {
+            n = n.trim();
+            if (n.matches("[A-Za-z0-9_.-]+")) out.add(n);
+        }
+        return out;
+    }
+
+    /** A picture from the phone: checked, made at most 1920x1080, kept here, and put in every theme's wallpapers. */
+    void addPhoto(byte[] data) throws Exception {
+        if (data == null || data.length == 0 || data.length > 15_000_000) throw new IllegalArgumentException("תמונה לא תקינה");
+        Bitmap picture = BitmapFactory.decodeByteArray(data, 0, data.length);
+        if (picture == null) throw new IllegalArgumentException("זה לא קובץ תמונה");
+        if (picture.getWidth() > 1920 || picture.getHeight() > 1080) {
+            float k = Math.min(1920f / picture.getWidth(), 1080f / picture.getHeight());
+            picture = Bitmap.createScaledBitmap(picture, Math.round(picture.getWidth() * k), Math.round(picture.getHeight() * k), true);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            picture.compress(Bitmap.CompressFormat.JPEG, 88, out);
+            data = out.toByteArray();
+        }
+        synchronized (work) {
+            String name = String.format(Locale.ROOT, "90-photo-%d.jpg", System.currentTimeMillis());
+            Files.write(new File(photoDir(), name).toPath(), data);
+            if (done && connectNow()) {
+                pushPhoto(targets(), name, data);
+                say("תמונה נוספה: " + name, "ok");
+            }
+        }
+    }
+
+    /** A photo to these themes: sent to the TV once, then put into each theme from there. */
+    private void pushPhoto(List<String> targets, String name, byte[] data) throws Exception {
+        if (targets.isEmpty()) return;
+        if (direct) {
+            for (String target : targets) providerWrite((target.isEmpty() ? "" : "themes/" + target + "/") + "wallpapers/" + name, data);
+            return;
+        }
+        String src = "/data/local/tmp/kit-photo";
+        pushBytes(data, src);
+        for (String target : targets) {
+            String base = FILES + (target.isEmpty() ? "" : "/themes/" + target);
+            String uri = URI + (target.isEmpty() ? "" : "/themes/" + target);
+            sh(writeFrom(base, uri, "wallpapers/" + name, src));
+        }
+        sh("rm -f " + src);
+    }
+
+    /**
+     * The setup's answers into every theme on the TV: the greeting in English and Hebrew, the place and its weather,
+     * and the phone's photos in the rotation (in every time-of-day group, so they show all day). Then Home restarts.
+     */
+    void finishSetup(String nameEn, String nameHe, String placeEn, String placeHe, double lat, double lon) throws Exception {
+        synchronized (work) {
+            setup().edit().putString("name_en", nameEn).putString("name_he", nameHe).putString("place_en", placeEn)
+                    .putString("place_he", placeHe).putString("lat", String.valueOf(lat)).putString("lon", String.valueOf(lon))
+                    .putBoolean("saved", true).commit();
+            say("שומר את השם, המקום והתמונות…", "step");
+            try {
+                if (!connectNow()) throw new IllegalStateException("לא מחובר לטלוויזיה");
+                applySetup();
+            } catch (Exception e) {
+                say("לא נשמר: " + (e.getMessage() == null ? e.toString() : e.getMessage()), "error");
+                throw e;
+            } finally {
+                flushLog();
+            }
+        }
+    }
+
+    /** Puts the saved answers and photos on the TV (after the setup screens, and again after an update). */
+    private void applySetup() throws Exception {
+        SharedPreferences p = setup();
+        direct = context.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS")
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        String[] photos = photoDir().list((d, n) -> n.endsWith(".jpg"));
+        if (photos == null) photos = new String[0];
+        Arrays.sort(photos);
+        List<String> themes = targets();
+        for (String photo : photos) {
+            List<String> missing = new ArrayList<>();
+            for (String t : themes) {
+                String base = FILES + (t.isEmpty() ? "" : "/themes/" + t);
+                boolean has = direct ? providerHas((t.isEmpty() ? "" : "themes/" + t + "/") + "wallpapers/" + photo)
+                        : sh("ls " + base + "/wallpapers/" + photo + " 2>/dev/null").contains(photo);
+                if (!has) missing.add(t);
+            }
+            if (!missing.isEmpty()) {
+                step = "התמונות שלך: " + photo;
+                pushPhoto(missing, photo, Files.readAllBytes(new File(photoDir(), photo).toPath()));
+            }
+        }
+        for (String t : themes) {
+            String base = FILES + (t.isEmpty() ? "" : "/themes/" + t);
+            String uri = URI + (t.isEmpty() ? "" : "/themes/" + t);
+            step = "ההגדרות שלך: " + (t.isEmpty() ? "ראשית" : t);
+            String prefix = t.isEmpty() ? "" : "themes/" + t + "/";
+            byte[] read = direct ? providerRead(prefix + "config.json") : null;
+            String text = read != null ? new String(read, StandardCharsets.UTF_8) : sh("cat " + base + "/config.json 2>/dev/null");
+            if (!text.trim().startsWith("{")) continue;
+            JSONObject cfg = new JSONObject(text);
+            if (!p.getString("name_en", "").isEmpty()) cfg.put("greeting_name", p.getString("name_en", ""));
+            if (!p.getString("name_he", "").isEmpty()) cfg.put("greeting_name_he", p.getString("name_he", ""));
+            if (!p.getString("place_en", "").isEmpty()) {
+                cfg.put("location_label", p.getString("place_en", "")).put("location_label_he", p.getString("place_he", ""))
+                        .put("weather_lat", Double.parseDouble(p.getString("lat", "0")))
+                        .put("weather_lon", Double.parseDouble(p.getString("lon", "0")));
+            }
+            JSONObject moods = cfg.optJSONObject("wallpaper_moods");
+            if (moods != null) {
+                for (java.util.Iterator<String> keys = moods.keys(); keys.hasNext(); ) {
+                    JSONArray group = moods.optJSONArray(keys.next());
+                    if (group == null) continue;
+                    for (String photo : photos) {
+                        boolean has = false;
+                        for (int i = 0; i < group.length(); i++) if (photo.equals(group.optString(i))) has = true;
+                        if (!has) group.put(photo);
+                    }
+                }
+            }
+            put(prefix + "config.json", cfg.toString(2).getBytes(StandardCharsets.UTF_8), base, uri);
+            put(prefix + "theme_revision", UUID.randomUUID().toString().replace("-", "").getBytes(StandardCharsets.UTF_8), base, uri);
+        }
+        restartHome();
+        say("השם, המקום והתמונות נשמרו", "ok");
+    }
+
+    // ---- files ----------------------------------------------------------------------------------------------
+
+    /** Bytes into a file on the TV through the shell user, so the shell can read them back. */
+    private void pushBytes(byte[] data, String remote) throws Exception {
+        pushBytes(data, remote, -1, -1);
+    }
+
+    /**
+     * As pushBytes; with from/to >= 0 the bar moves from {@code from} to {@code to} as the bytes go.
+     * <p>
+     * The file goes over in pieces of 32 KB, each one a short shell command ({@code echo <base64> | base64 -d >>}),
+     * not through one long stream: a long stream could lock up the whole connection (seen on a TCL: 0 bytes arrived and
+     * nothing after it answered). Every piece has its own time limit and up to 3 tries on a fresh connection, and the
+     * size on the TV is checked at the end; the whole file is sent again (up to 3 times) if it is not right.
+     */
+    /** This TV takes 192 KB pieces (until one fails). */
+    private volatile boolean bigPieces = false;   // 192 KB pieces were refused on a Formovie (10 s lost): 32 KB from the start
+
+    private void pushBytes(byte[] data, String remote, int from, int to) throws Exception {
+        String problem = "";
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            // 192 KB pieces where the TV takes them (fewer commands, much faster); 32 KB after a failure.
+            final int piece = bigPieces ? 192 * 1024 : 32 * 1024;
+            try {
+                sh("rm -f " + remote + "; : > " + remote, 20_000);
+                for (int at = 0; at < data.length; at += piece) {
+                    int n = Math.min(piece, data.length - at);
+                    String b64 = android.util.Base64.encodeToString(data, at, n, android.util.Base64.NO_WRAP);
+                    sh("echo '" + b64 + "' | base64 -d >> " + remote, bigPieces ? 10_000 : 20_000, bigPieces ? 1 : 3);
+                    if (from >= 0) progress = from + (int) ((long) (to - from) * (at + n) / Math.max(1, data.length));
+                }
+                String size = sh("stat -c %s " + remote + " 2>/dev/null", 20_000).trim();
+                if (size.equals(String.valueOf(data.length))) {
+                    if (from >= 0) progress = to;
+                    return;
+                }
+                problem = "הגיעו " + size + " מתוך " + data.length + " בתים";
+            } catch (IllegalStateException e) {
+                problem = e.getMessage();
+            }
+            if (bigPieces) {
+                bigPieces = false;   // this TV wants smaller pieces: the same file again at once, small
+                Adb.fresh(context);
+                continue;
+            }
+            if (attempt < 3) {
+                say("העתקה לא הצליחה (" + problem + "), מתחבר מחדש ומנסה שוב", "warn");
+                Adb.fresh(context);
+            }
+        }
+        throw new IllegalStateException("העתקת קובץ לטלוויזיה לא הצליחה 3 פעמים (" + problem + ")");
+    }
+
+    private void pushAsset(String asset, String remote, int from, int to) throws Exception {
+        pushBytes(read(asset), remote, from, to);
     }
 
     List<String> slots() throws Exception {

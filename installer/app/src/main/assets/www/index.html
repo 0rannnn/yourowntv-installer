@@ -39,6 +39,9 @@
   label.check input { width: 22px; height: 22px; accent-color: var(--blue); flex: none; margin-top: 1px; }
   details { color: var(--dim); font-size: 13px; margin: 0 32px 6px 0; }
   details ul { direction: ltr; text-align: right; padding-inline-start: 18px; }
+  #bar { position: relative; height: 14px; border-radius: 7px; background: rgba(255,255,255,.14); margin: 12px 34px 12px 0; direction: ltr; }
+  #barFill { height: 100%; width: 0; border-radius: 7px; background: var(--green); transition: width .45s cubic-bezier(.2,.8,.2,1); }
+  #barNum { position: absolute; right: -34px; top: -4px; font-size: 13px; font-weight: 600; color: var(--text); }
   #log { background: #0b0c10; border: 1px solid var(--line); border-radius: 12px; padding: 10px; max-height: 50vh; overflow: auto;
          font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; display: none; margin-top: 10px; }
   #log .step { color: #64d2ff; font-weight: 600; margin-top: 6px; }
@@ -69,7 +72,7 @@
   <h2><span class="n">2</span>למי המקרן</h2>
   <input type="text" id="name" placeholder="השם באנגלית (Dani)" dir="ltr" autocomplete="off">
   <input type="text" id="nameHe" placeholder="השם בעברית (דני)" autocomplete="off">
-  <input type="text" id="city" placeholder="עיר, למשל חולון" autocomplete="off">
+  <input type="text" id="city" placeholder="עיר, למשל חיפה" autocomplete="off">
   <button id="findCity">חפש עיר (למזג האוויר)</button>
   <div class="msg" id="cityMsg"></div>
 </section>
@@ -94,6 +97,7 @@
   <div class="sub">קודם נשמר גיבוי במקרן, ואפשר להחזיר הכל ממנו. לוקח כמה דקות; כדאי ללחוץ בשלט מדי פעם.</div>
   <button class="go" id="run">התחל התקנה</button>
   <div class="msg" id="runMsg"></div>
+  <div id="bar" style="display:none"><div id="barFill"></div><span id="barNum"></span></div>
   <div id="log"></div>
   <button id="restore" style="display:none">להחזיר את המקרן למצב שלפני ההתקנה</button>
 </section>
@@ -189,6 +193,8 @@ $('restore').onclick = async () => {
 async function follow() {
   let st;
   try { st = await (await fetch('/api/state')).json(); } catch (e) { setTimeout(follow, 2000); return; }
+  const p = Math.max(1, Math.min(100, st.progress || 0));
+  if (st.running || st.done || st.error) { $('bar').style.display = 'block'; $('barFill').style.width = p + '%'; $('barNum').textContent = p + '/100'; }
   const log = $('log'); log.style.display = 'block'; log.innerHTML = '';
   for (const l of st.log) { const d = document.createElement('div'); d.className = l.kind; d.textContent = (l.kind === 'step' ? '' : l.t + '  ') + l.text; log.append(d); }
   log.scrollTop = log.scrollHeight;

@@ -4,6 +4,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Granted over ADB during the install: the launcher's theme provider lets a holder write the theme files
+         straight from this app (seconds), instead of hundreds of ADB commands (minutes). -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <!-- InstallService keeps the app alive (not frozen) while the install runs behind the new home. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Network service discovery finds this projector's own Wireless debugging ports. -->
@@ -11,6 +17,11 @@
 
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <!-- The launcher's theme provider (Android 11+ hides other apps' providers otherwise). -->
+    <queries>
+        <package android:name="com.gathin.tvhome" />
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -23,6 +34,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:screenOrientation="landscape"
+            android:launchMode="singleTask"
             android:keepScreenOn="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -30,5 +42,9 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".InstallService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>

@@ -7,3 +7,5 @@ installer/app/src/main/assets/library/
 installer/app/src/main/assets/debloat/
 installer/app/src/main/assets/launcher.apk
 __pycache__/
+web/
+web-site.json
