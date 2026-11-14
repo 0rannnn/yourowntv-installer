@@ -1,79 +1,90 @@
-"""Puts the TV installer online: phone-kit/web (index.html, tv.apk, _headers) onto a Netlify site, so a TV downloads it
-with the Downloader app and no stick or computer. The token is read from netlify-token.txt beside the project folders
-(never printed, never committed); the site's id is kept in web-site.json (git-ignored) so later runs update it.
+"""Puts the TV installer online on GitHub Pages (https://USER.github.io), so a TV downloads it with the Downloader
+app and no stick or computer: phone-kit/web (index.html, tv.apk) plus version.json, which the installers on TVs
+compare themselves with (Kit.updateIfNewer), and /i, a page that sends Downloader straight to tv.apk.
 
-    python deploy.py            first run: makes a site with a short random name, then uploads
+USER is read from pages-site.json beside this file ({"user": "..."}; git-ignored, so no account name is committed).
+The pages live in phone-kit/pages-repo (git-ignored), a clone of the USER.github.io repository. Every upload is
+one fresh commit pushed over the last (force), so the repository never grows past one copy of the installer. Git's
+own credential manager signs the push in; nothing secret is read or printed here.
+
+Netlify (tv-i.netlify.app) was the host until its free credits ran out on 2026-11-14; it keeps the last version
+it had and is no longer updated.
+
+    python deploy.py
 """
-import io
+import hashlib
 import json
 import os
-import secrets
+import shutil
+import subprocess
 import sys
-import urllib.error
+import time
 import urllib.request
-import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(HERE, "web")
-SITE_FILE = os.path.join(HERE, "web-site.json")
-TOKEN_FILE = os.path.join(os.path.dirname(HERE), "netlify-token.txt")
-API = "https://api.netlify.com/api/v1"
+REPO = os.path.join(HERE, "pages-repo")
+SITE_FILE = os.path.join(HERE, "pages-site.json")
+
+# /i: Downloader opens the page and follows it to the installer (GitHub Pages has no server-side redirects).
+REDIRECT = """<!doctype html>
+<html><head><meta charset="utf-8"><meta name="robots" content="noindex">
+<meta http-equiv="refresh" content="0; url=/tv.apk"><title>tv.apk</title></head>
+<body><script>location.replace('/tv.apk')</script><a href="/tv.apk">tv.apk</a></body></html>
+"""
 
 
-def call(method, path, token, data=None, content_type="application/json"):
-    req = urllib.request.Request(API + path, data=data, method=method)
-    req.add_header("Authorization", "Bearer " + token)
-    req.add_header("User-Agent", "tv-installer-deploy")
-    if data is not None:
-        req.add_header("Content-Type", content_type)
-    with urllib.request.urlopen(req, timeout=300) as r:
-        return json.loads(r.read().decode("utf-8") or "{}")
+def git(*args):
+    return subprocess.run(["git", "-C", REPO, *args], check=True, capture_output=True, text=True).stdout
 
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
-    if not os.path.isfile(TOKEN_FILE):
-        print("no token: save a Netlify personal access token in " + TOKEN_FILE)
+    if not os.path.isfile(SITE_FILE):
+        print('no host: save {"user": "<GitHub username>"} in ' + SITE_FILE)
         return 2
-    token = open(TOKEN_FILE, encoding="utf-8").read().strip()
-    site = json.load(open(SITE_FILE, encoding="utf-8")) if os.path.isfile(SITE_FILE) else None
+    user = json.load(open(SITE_FILE, encoding="utf-8"))["user"].strip()
+    site, remote = "https://%s.github.io" % user.lower(), "https://github.com/%s/%s.github.io.git" % (user, user.lower())
+    apk = os.path.join(WEB, "tv.apk")
+    digest = hashlib.sha256(open(apk, "rb").read()).hexdigest()
     try:
-        if not site:
-            for _ in range(5):
-                name = "tvhome-" + secrets.token_hex(2)
-                try:
-                    made = call("POST", "/sites", token, json.dumps({"name": name}).encode())
-                    break
-                except urllib.error.HTTPError as e:
-                    if e.code != 422:   # 422: the name is taken, try another
-                        raise
-            site = {"id": made["id"], "url": made.get("ssl_url") or made.get("url")}
-            json.dump(site, open(SITE_FILE, "w", encoding="utf-8"), indent=2)
-        # version.json: what the installers on TVs compare themselves with (Kit.updateIfNewer).
-        import hashlib, time
-        apk = os.path.join(WEB, "tv.apk")
-        digest = hashlib.sha256(open(apk, "rb").read()).hexdigest()
-        # Every deploy costs the Netlify account credits: an installer that is already online is not sent again.
-        try:
-            online = json.loads(urllib.request.urlopen(site["url"].rstrip("/") + "/version.json?t=%d" % time.time(),
-                                                       timeout=15).read().decode("utf-8"))
-            if online.get("sha256") == digest:
-                print("unchanged: this installer is already online")
-                return 0
-        except Exception:
-            pass
-        json.dump({"sha256": digest, "size": os.path.getsize(apk), "built": time.strftime("%Y-%m-%d %H:%M")},
-                  open(os.path.join(WEB, "version.json"), "w", encoding="utf-8"))
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            for name in os.listdir(WEB):
-                z.write(os.path.join(WEB, name), name)
-        deploy = call("POST", "/sites/%s/deploys" % site["id"], token, buf.getvalue(), "application/zip")
-    except urllib.error.HTTPError as e:
-        print("netlify refused: %s %s" % (e.code, e.read().decode("utf-8", "replace")[:200]))
+        online = json.loads(urllib.request.urlopen(site + "/version.json?t=%d" % time.time(), timeout=15)
+                            .read().decode("utf-8"))
+        if online.get("sha256") == digest:
+            print("unchanged: this installer is already online")
+            return 0
+    except Exception:
+        pass
+    version = {"sha256": digest, "size": os.path.getsize(apk), "built": time.strftime("%Y-%m-%d %H:%M")}
+    json.dump(version, open(os.path.join(WEB, "version.json"), "w", encoding="utf-8"))
+
+    if not os.path.isdir(os.path.join(REPO, ".git")):
+        os.makedirs(REPO, exist_ok=True)
+        subprocess.run(["git", "init", "-q", "-b", "main", REPO], check=True)
+        git("remote", "add", "origin", remote)
+    for name in os.listdir(REPO):
+        if name != ".git":
+            path = os.path.join(REPO, name)
+            shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
+    for name in ("index.html", "tv.apk", "version.json"):
+        shutil.copy2(os.path.join(WEB, name), os.path.join(REPO, name))
+    os.makedirs(os.path.join(REPO, "i"))
+    open(os.path.join(REPO, "i", "index.html"), "w", encoding="utf-8").write(REDIRECT)
+    open(os.path.join(REPO, ".nojekyll"), "w").close()
+
+    git("checkout", "-q", "--orphan", "next")
+    git("add", "-A")
+    git("-c", "user.name=TV installer", "-c", "user.email=tv-installer@users.noreply.github.com",
+        "commit", "-q", "-m", "Installer " + version["built"])
+    subprocess.run(["git", "-C", REPO, "branch", "-D", "main"], capture_output=True)
+    git("branch", "-m", "main")
+    try:
+        git("push", "-q", "-f", "origin", "main")
+    except subprocess.CalledProcessError as e:
+        print("github refused: " + (e.stderr or "").strip()[:300])
         return 1
-    print("deployed:", site["url"], "state:", deploy.get("state"))
-    print("installer:", site["url"].rstrip("/") + "/tv.apk")
+    print("deployed:", site, "(GitHub Pages; live within a minute or two)")
+    print("installer:", site + "/i")
     return 0
 
 

@@ -204,7 +204,19 @@ final class Kit implements WebServer.Handler {
 
     // ---- self-update: the installer on the stick or from Downloader may be older than the one online ----------
 
-    static final String SITE = "https://tv-i.netlify.app";
+    /** Where the newest installer was before (its free credits ran out): the last place to look. */
+    static final String OLD_SITE = "https://tv-i.netlify.app";
+
+    /** Where the newest installer is: the GitHub Pages site deploy.py uploads to (assets/site.txt), then OLD_SITE. */
+    private String[] sites() {
+        try (InputStream in = context.getAssets().open("site.txt")) {
+            String site = new String(in.readAllBytes(), StandardCharsets.UTF_8).trim();
+            if (site.startsWith("https://")) return new String[]{site, OLD_SITE};
+        } catch (IOException none) {
+            // built without one
+        }
+        return new String[]{OLD_SITE};
+    }
 
     /**
      * When the installer online (SITE/version.json, written by deploy.py on every commit) is not this one, it is
@@ -213,13 +225,24 @@ final class Kit implements WebServer.Handler {
      * with this version.
      */
     boolean updateIfNewer(java.util.function.Consumer<String> status) {
+        JSONObject online = null;
+        String site = null;
+        for (String s : sites()) {
+            try {
+                online = new JSONObject(new String(fetch(s + "/version.json", 8_000), StandardCharsets.UTF_8));
+                site = s;
+                break;
+            } catch (Exception tryNext) {
+                // this host is not answering: the next one
+            }
+        }
+        if (online == null) return false;
         try {
-            JSONObject online = new JSONObject(new String(fetch(SITE + "/version.json", 8_000), StandardCharsets.UTF_8));
             String want = online.optString("sha256");
             if (want.isEmpty() || want.equalsIgnoreCase(sha256(new File(context.getApplicationInfo().sourceDir)))) return false;
             status.accept("יש גרסה חדשה של המתקין, מורידה…");
             File apk = new File(context.getExternalFilesDir(null), "update.apk");
-            try (InputStream in = open(SITE + "/tv.apk", 20_000); OutputStream out = new java.io.FileOutputStream(apk)) {
+            try (InputStream in = open(site + "/tv.apk", 20_000); OutputStream out = new java.io.FileOutputStream(apk)) {
                 byte[] buffer = new byte[65536];
                 long total = Math.max(1, online.optLong("size", 20_000_000)), got = 0;
                 int n, last = -1;

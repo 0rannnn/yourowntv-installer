@@ -12,3 +12,6 @@ web-site.json
 publish.log
 publish.lock
 publish.again
+pages-repo/
+pages-site.json
+installer/app/src/main/assets/site.txt
