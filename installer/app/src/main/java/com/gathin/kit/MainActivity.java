@@ -606,7 +606,7 @@ public class MainActivity extends Activity {
     /** Screen 3: photos from the phone, by a QR code to this app's photo page; then everything goes on the TV. */
     private void showPhotos() {
         String url = "http://" + Adb.ownAddress(this) + ":" + WebServer.PORT + "/photos";
-        LinearLayout page = screen("תמונות מהטלפון", "סורקים את הקוד בטלפון (על אותה רשת Wi-Fi) ובוחרים תמונות. הן נשמרות בטלוויזיה כערכה משלהן, "תמונות", שבוחרים מחלונית ההגדרות.");
+        LinearLayout page = screen("תמונות מהטלפון", "סורקים את הקוד בטלפון (על אותה רשת Wi-Fi) ובוחרים תמונות. הן נשמרות בטלוויזיה כערכה משלהן, \"תמונות\", שבוחרים מחלונית ההגדרות.");
         ImageView qr = new ImageView(this);
         qr.setImageBitmap(qrCode(url, 512));
         LinearLayout.LayoutParams qrLp = new LinearLayout.LayoutParams(px(170), px(170));
