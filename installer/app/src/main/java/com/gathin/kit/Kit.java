@@ -435,6 +435,66 @@ final class Kit implements WebServer.Handler {
         return out;
     }
 
+    /**
+     * Troubleshooting from afar (the launcher's Troubleshooting card): the TV's ADB listening on port 5555 on every
+     * network, so the computer reaches it through Tailscale wherever the TV is. True when it listens (now or already).
+     */
+    boolean openRemoteAdb() {
+        try {
+            if (!connectNow()) return false;
+            if (remoteAdbOpen()) return true;
+            Adb.get(context).tcpip(5555);
+            for (int i = 0; i < 8; i++) {
+                Thread.sleep(1500);
+                try {
+                    if (connectNow() && remoteAdbOpen()) return true;
+                } catch (Exception ignored) {
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Whether the TV's ADB listens on port 5555 for everyone (0.0.0.0 or ::), not only on this TV itself. */
+    private boolean remoteAdbOpen() throws Exception {
+        return !sh("cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | grep -iE ' (00000000|00000000000000000000000000000000):15B3 .* 0A '")
+                .trim().isEmpty();
+    }
+
+    /**
+     * The troubleshooting report: what the TV is, what of ours runs on it, its volume and who changed it (the
+     * system's own volume history names the app behind every change), its input devices and the recent log lines
+     * that matter. Written on the TV (nothing long comes back over this connection) to Download/tv-report.txt and
+     * into the launcher's files, where the phone page offers it for download. Nothing leaves the TV by itself.
+     */
+    boolean writeReport() {
+        try {
+            if (!connectNow()) return false;
+            String f = "/sdcard/Download/tv-report.txt";
+            sh("{ echo \"== tv report $(date)\"; getprop ro.product.manufacturer; getprop ro.product.model;"
+                    + " echo \"Android $(getprop ro.build.version.release)\";"
+                    + " dumpsys package com.gathin.tvhome | grep -E 'versionName|lastUpdateTime' | head -2;"
+                    + " dumpsys package com.gathin.kit | grep -E 'versionName|lastUpdateTime' | head -2;"
+                    + " echo '== settings'; settings get secure enabled_accessibility_services;"
+                    + " cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1;"
+                    + " echo '-- disabled'; pm list packages -d;"
+                    + " echo '== volume'; cmd media_session volume --stream 3 --get | tail -1;"
+                    + " dumpsys audio | grep -iE 'fixed volume|mFixedVolume|safe media|isMasterMute|full volume' | head -8;"
+                    + " echo '-- who changed the volume (newest last)';"
+                    + " dumpsys audio | grep -iE 'adjustStreamVolume|setStreamVolume|adjustSuggestedStreamVolume|volumeKey|setMasterMute' | tail -80;"
+                    + " echo '== watcher'; ps -A | grep -E ' getevent$| nc$'; cat /data/local/tmp/tvhome-volhold.pid 2>/dev/null;"
+                    + " echo '== input devices'; getevent -i 2>/dev/null | grep -E 'add device|name:' | head -40;"
+                    + " echo '== log'; logcat -d -t 1500 | grep -iE 'gathin|VolumeHold|VolumeMeter|VolumeKeys|audio_hw|AudioService|ProjectorIR|AndroidRuntime|FATAL' | tail -250;"
+                    // Through a pipe: the system's "cmd" commands refuse to write straight into a file on the storage.
+                    + " } 2>&1 | cat > " + f + "; content write --uri " + URI + "/tv-report.txt < " + f, 60_000, 1);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /** Starts (or restarts) the volume watcher; false when this TV's ADB does not answer. */
     boolean startVolumeWatcher() {
         try {

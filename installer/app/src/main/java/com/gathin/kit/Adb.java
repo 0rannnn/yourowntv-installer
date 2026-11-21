@@ -217,6 +217,38 @@ final class Adb extends AbsAdbConnectionManager {
         }
     }
 
+    /**
+     * What a computer's "adb tcpip PORT" does: the TV's ADB starts listening on this port on every network (Wi-Fi and
+     * Tailscale), so a computer can connect to it from elsewhere. The TV's ADB restarts, which ends this connection.
+     */
+    String tcpip(int port) throws Exception {
+        AdbStream[] opened = {null};
+        Thread open = new Thread(() -> {
+            try {
+                opened[0] = openStream("tcpip:" + port);
+            } catch (Throwable ignored) {
+            }
+        }, "adb-tcpip");
+        open.setDaemon(true);
+        open.start();
+        open.join(10_000);
+        if (opened[0] == null) throw new IllegalStateException("הטלוויזיה לא ענתה (tcpip)");
+        StringBuilder reply = new StringBuilder();
+        Thread reader = new Thread(() -> {
+            try (InputStream in = opened[0].openInputStream()) {
+                byte[] buffer = new byte[256];
+                int n;
+                while ((n = in.read(buffer)) > 0) reply.append(new String(buffer, 0, n, java.nio.charset.StandardCharsets.UTF_8));
+            } catch (Throwable ignored) {
+            }
+        }, "adb-tcpip-read");
+        reader.setDaemon(true);
+        reader.start();
+        reader.join(3000);
+        reset();
+        return reply.toString().trim();
+    }
+
     /** A connection that stopped answering is let go and a fresh one made (see {@link #fresh}). */
     boolean reconnect() {
         return fresh(context);

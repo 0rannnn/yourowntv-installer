@@ -61,6 +61,15 @@
                 <action android:name="com.gathin.kit.action.VOLUME_WATCHER" />
             </intent-filter>
         </receiver>
+        <!-- The launcher's Troubleshooting card: the repair channel for the computer, and the troubleshooting report. -->
+        <receiver
+            android:name=".RemoteReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.gathin.kit.action.REMOTE_ON" />
+                <action android:name="com.gathin.kit.action.REPORT" />
+            </intent-filter>
+        </receiver>
         <service
             android:name=".InstallService"
             android:exported="false"
