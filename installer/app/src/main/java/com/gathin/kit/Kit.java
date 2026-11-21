@@ -311,6 +311,27 @@ final class Kit implements WebServer.Handler {
         return hex.toString();
     }
 
+    /**
+     * The shell-side watcher for holding a volume key (the launcher's VolumeHold): getevent's lines streamed to the
+     * launcher on 127.0.0.1:8897, so a held key repeats quickly even where the firmware hides the keys from apps. It
+     * runs on its own session (it outlives this connection) and reconnects whenever Home restarts; the old one goes
+     * first, by its saved process group. Shell processes end at a reboot: WatcherReceiver starts it again.
+     */
+    static final String VOLUME_WATCHER = "p=/data/local/tmp/tvhome-volhold.pid; [ -f $p ] && kill -9 -$(cat $p) 2>/dev/null; "
+            + "setsid nohup sh -c 'echo $$ > /data/local/tmp/tvhome-volhold.pid; while true; do getevent -ql 2>/dev/null"
+            + " | nc 127.0.0.1 8897 >/dev/null 2>&1; sleep 3; done' >/dev/null 2>&1 </dev/null & sleep 1";
+
+    /** Starts (or restarts) the volume watcher; false when this TV's ADB does not answer. */
+    boolean startVolumeWatcher() {
+        try {
+            if (!connectNow()) return false;
+            sh(VOLUME_WATCHER, 20_000, 1);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /** Whether this TV's own ADB answers now (paired before, or its network debugging port is open). */
     boolean connectNow() {
         try {
@@ -533,6 +554,7 @@ final class Kit implements WebServer.Handler {
         if (!dry) {
             restartHome();
             backInFront();
+            sh(VOLUME_WATCHER, 20_000, 1);   // holding a volume key repeats quickly (the launcher's VolumeHold)
         }
         progress = 92;
 

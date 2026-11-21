@@ -4,6 +4,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Granted over ADB during the install: the launcher's theme provider lets a holder write the theme files
          straight from this app (seconds), instead of hundreds of ADB commands (minutes). -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
@@ -42,6 +43,15 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- After a reboot, and when Home asks: the shell watcher for holding a volume key (Kit.VOLUME_WATCHER). -->
+        <receiver
+            android:name=".WatcherReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="com.gathin.kit.action.VOLUME_WATCHER" />
+            </intent-filter>
+        </receiver>
         <service
             android:name=".InstallService"
             android:exported="false"

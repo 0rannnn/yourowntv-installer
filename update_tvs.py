@@ -15,6 +15,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ADB = os.path.join(ROOT, "ערכה-לחבר", "מערכת", "tools", "adb", "adb.exe")
 TVS = os.path.join(ROOT, "wallpaper-editor", "tvs.json")
+# The shell watcher for holding a volume key (the launcher's VolumeHold; the same line as the setup app's
+# Kit.VOLUME_WATCHER): restarted on every run, so a held key repeats quickly even after a reboot or a new launcher.
+WATCHER = ("p=/data/local/tmp/tvhome-volhold.pid; [ -f $p ] && kill -9 -$(cat $p) 2>/dev/null; "
+           "setsid nohup sh -c 'echo $$ > /data/local/tmp/tvhome-volhold.pid; while true; do getevent -ql 2>/dev/null"
+           " | nc 127.0.0.1 8897 >/dev/null 2>&1; sleep 3; done' >/dev/null 2>&1 </dev/null & sleep 1")
 APPS = [("com.gathin.tvhome", os.path.join(ROOT, "ערכה-לחבר", "מערכת", "launcher.apk"), "מסך הבית"),
         ("com.gathin.kit", os.path.join(HERE, "out", "FormovieKit.apk"), "אפליקציית ההתקנה")]
 
@@ -52,6 +57,9 @@ def main():
                     continue
                 result = adb("-s", host, "install", "-r", "-g", apk, timeout=240)
                 print("%s: %s %s" % (host, label, "עודכן" if "Success" in result else "נכשל: " + result[-200:]))
+            if adb("-s", host, "shell", "pm path com.gathin.tvhome").startswith("package:"):
+                adb("-s", host, "shell", WATCHER, timeout=20)
+                print("%s: החזקת ווליום מהירה פעילה" % host)
         except subprocess.TimeoutExpired:
             print(host + ": לא ענה בזמן, דילוג")
     return 0
