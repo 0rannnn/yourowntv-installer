@@ -334,13 +334,18 @@ final class Kit implements WebServer.Handler {
             if (!sh("cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1")
                     .contains(gtv)) return "";
             stepTo("1. קורא את סדר האפליקציות מ-Google TV");
+            // Our launcher already here (an update) sends Google TV's home away the moment it opens (its
+            // stock_home_redirect): stopped first, so Google TV stays on screen to be read. It is reinstalled next.
+            if (sh("pm path " + PKG).contains("package:")) sh("am force-stop " + PKG);
             sh("am start -n " + gtv + "/.home.HomeActivity; sleep 5; input keyevent DPAD_UP; input keyevent DPAD_UP; "
                     + "input keyevent DPAD_RIGHT; sleep 3; input keyevent DPAD_DOWN; sleep 1", 30_000, 1);
             List<String> names = new ArrayList<>();
             String lastSeen = "";
             for (int round = 0; round < 10; round++) {
-                String xml = sh("uiautomator dump /sdcard/kit-gtv.xml >/dev/null 2>&1; cat /sdcard/kit-gtv.xml", 20_000, 1);
-                List<String> row = yourAppsRow(xml);
+                // Only "name|bounds" lines come back (the whole dump is one 35 KB line, too much for this connection).
+                String lines = sh("uiautomator dump /sdcard/kit-gtv.xml >/dev/null 2>&1; tr '>' '\\n' < /sdcard/kit-gtv.xml"
+                        + " | sed -n 's/.*content-desc=\"\\([^\"]*\\)\".*bounds=\"\\([^\"]*\\)\".*/\\1|\\2/p'", 20_000, 1);
+                List<String> row = yourAppsRow(lines);
                 if (row.isEmpty()) break;
                 mergeInOrder(names, row);
                 String now = row.get(row.size() - 1);
@@ -354,7 +359,7 @@ final class Kit implements WebServer.Handler {
             say("סדר האפליקציות מ-Google TV: " + packages.size() + " אפליקציות", packages.isEmpty() ? "warn" : "ok");
             return String.join("\n", packages);
         } catch (Exception e) {
-            say("לא הצלחתי לקרוא את סדר האפליקציות מ-Google TV (ממשיך בלעדיו)", "warn");
+            say("לא הצלחתי לקרוא את סדר האפליקציות מ-Google TV (ממשיך בלעדיו): " + e, "warn");
             try {
                 backInFront();
             } catch (Exception ignored) {
@@ -363,16 +368,16 @@ final class Kit implements WebServer.Handler {
         }
     }
 
-    /** The app names in the "Your apps" row of a uiautomator dump, left to right. */
-    static List<String> yourAppsRow(String xml) {
-        java.util.regex.Matcher node = java.util.regex.Pattern.compile("<node [^>]*>").matcher(xml);
+    /** The app names in the "Your apps" row, left to right, from uiautomator's "content-desc|bounds" lines. */
+    static List<String> yourAppsRow(String lines) {
         int top = -1, bottom = -1;
         List<int[]> boxes = new ArrayList<>();
         List<String> labels = new ArrayList<>();
-        while (node.find()) {
-            String n = node.group();
-            String desc = attr(n, "content-desc");
-            int[] b = bounds(attr(n, "bounds"));
+        for (String line : lines.split("\n")) {
+            int bar = line.lastIndexOf('|');
+            if (bar < 0) continue;
+            String desc = line.substring(0, bar).trim();
+            int[] b = bounds(line.substring(bar + 1));
             if (b == null) continue;
             if (top < 0 && "Your apps".equals(desc)) {
                 top = b[1];
@@ -395,11 +400,6 @@ final class Kit implements WebServer.Handler {
     /** Adds the names of the next view of the row after the ones already read (the part both views show once). */
     static void mergeInOrder(List<String> all, List<String> view) {
         for (String name : view) if (!all.contains(name)) all.add(name);
-    }
-
-    private static String attr(String node, String name) {
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile(" " + name + "=\"([^\"]*)\"").matcher(node);
-        return m.find() ? m.group(1) : "";
     }
 
     private static int[] bounds(String text) {
