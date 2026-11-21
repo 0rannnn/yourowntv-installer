@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import android.content.Intent;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -321,6 +322,119 @@ final class Kit implements WebServer.Handler {
             + "setsid nohup sh -c 'echo $$ > /data/local/tmp/tvhome-volhold.pid; while true; do getevent -ql 2>/dev/null"
             + " | nc 127.0.0.1 8897 >/dev/null 2>&1; sleep 3; done' >/dev/null 2>&1 </dev/null & sleep 1";
 
+    /**
+     * The order of the TV's own Google TV home ("Your apps"), as packages one per line; "" when it cannot be read.
+     * Google TV keeps it to itself, so it is read off the screen: its Apps tab opens, the row is walked with the
+     * remote's Right key and read with uiautomator after every few steps, and the names are matched to the apps.
+     * Takes about 15 seconds; this app comes back to the front afterwards.
+     */
+    private String googleTvOrder() {
+        String gtv = "com.google.android.apps.tv.launcherx";
+        try {
+            if (!sh("cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1")
+                    .contains(gtv)) return "";
+            stepTo("1. קורא את סדר האפליקציות מ-Google TV");
+            sh("am start -n " + gtv + "/.home.HomeActivity; sleep 5; input keyevent DPAD_UP; input keyevent DPAD_UP; "
+                    + "input keyevent DPAD_RIGHT; sleep 3; input keyevent DPAD_DOWN; sleep 1", 30_000, 1);
+            List<String> names = new ArrayList<>();
+            String lastSeen = "";
+            for (int round = 0; round < 10; round++) {
+                String xml = sh("uiautomator dump /sdcard/kit-gtv.xml >/dev/null 2>&1; cat /sdcard/kit-gtv.xml", 20_000, 1);
+                List<String> row = yourAppsRow(xml);
+                if (row.isEmpty()) break;
+                mergeInOrder(names, row);
+                String now = row.get(row.size() - 1);
+                if (now.equals(lastSeen)) break;   // the row's end: walking on shows nothing new
+                lastSeen = now;
+                sh("for i in 1 2 3 4 5 6; do input keyevent DPAD_RIGHT; done; sleep 1", 20_000, 1);
+            }
+            sh("rm -f /sdcard/kit-gtv.xml");
+            backInFront();
+            List<String> packages = packagesFor(names);
+            say("סדר האפליקציות מ-Google TV: " + packages.size() + " אפליקציות", packages.isEmpty() ? "warn" : "ok");
+            return String.join("\n", packages);
+        } catch (Exception e) {
+            say("לא הצלחתי לקרוא את סדר האפליקציות מ-Google TV (ממשיך בלעדיו)", "warn");
+            try {
+                backInFront();
+            } catch (Exception ignored) {
+            }
+            return "";
+        }
+    }
+
+    /** The app names in the "Your apps" row of a uiautomator dump, left to right. */
+    static List<String> yourAppsRow(String xml) {
+        java.util.regex.Matcher node = java.util.regex.Pattern.compile("<node [^>]*>").matcher(xml);
+        int top = -1, bottom = -1;
+        List<int[]> boxes = new ArrayList<>();
+        List<String> labels = new ArrayList<>();
+        while (node.find()) {
+            String n = node.group();
+            String desc = attr(n, "content-desc");
+            int[] b = bounds(attr(n, "bounds"));
+            if (b == null) continue;
+            if (top < 0 && "Your apps".equals(desc)) {
+                top = b[1];
+                bottom = b[3];
+                continue;
+            }
+            if (top >= 0 && !desc.isEmpty() && b[1] >= top && b[3] <= bottom + 2 && b[2] - b[0] < 400) {
+                boxes.add(b);
+                labels.add(clean(desc));
+            }
+        }
+        Integer[] idx = new Integer[labels.size()];
+        for (int i = 0; i < idx.length; i++) idx[i] = i;
+        java.util.Arrays.sort(idx, (a, c) -> Integer.compare(boxes.get(a)[0], boxes.get(c)[0]));
+        List<String> out = new ArrayList<>();
+        for (int i : idx) if (!out.contains(labels.get(i))) out.add(labels.get(i));
+        return out;
+    }
+
+    /** Adds the names of the next view of the row after the ones already read (the part both views show once). */
+    static void mergeInOrder(List<String> all, List<String> view) {
+        for (String name : view) if (!all.contains(name)) all.add(name);
+    }
+
+    private static String attr(String node, String name) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(" " + name + "=\"([^\"]*)\"").matcher(node);
+        return m.find() ? m.group(1) : "";
+    }
+
+    private static int[] bounds(String text) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]").matcher(text);
+        if (!m.find()) return null;
+        return new int[]{Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3)),
+                Integer.parseInt(m.group(4))};
+    }
+
+    /** A label as uiautomator writes it: direction marks dropped, &amp; and friends decoded. */
+    static String clean(String label) {
+        return label.replaceAll("[\\u200e\\u200f\\u202a-\\u202e]", "").replace("&amp;", "&").replace("&quot;", "\"")
+                .replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">").trim();
+    }
+
+    /** The packages of the apps with these names, in the same order (names that match no app are left out). */
+    private List<String> packagesFor(List<String> names) {
+        android.content.pm.PackageManager pm = context.getPackageManager();
+        java.util.Map<String, String> byLabel = new java.util.HashMap<>();
+        for (String category : new String[]{Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER}) {
+            Intent main = new Intent(Intent.ACTION_MAIN).addCategory(category);
+            for (android.content.pm.ResolveInfo ri : pm.queryIntentActivities(main, 0)) {
+                byLabel.putIfAbsent(clean(String.valueOf(ri.loadLabel(pm))).toLowerCase(Locale.ROOT), ri.activityInfo.packageName);
+                byLabel.putIfAbsent(clean(String.valueOf(ri.activityInfo.applicationInfo.loadLabel(pm))).toLowerCase(Locale.ROOT),
+                        ri.activityInfo.packageName);
+            }
+        }
+        List<String> out = new ArrayList<>();
+        for (String name : names) {
+            String p = byLabel.get(name.toLowerCase(Locale.ROOT));
+            if (p != null && !out.contains(p) && !p.equals(PKG)) out.add(p);
+        }
+        return out;
+    }
+
     /** Starts (or restarts) the volume watcher; false when this TV's ADB does not answer. */
     boolean startVolumeWatcher() {
         try {
@@ -466,6 +580,15 @@ final class Kit implements WebServer.Handler {
         write(new File(backup, "state.json"), state.toString(2));
         say("נשמר", "ok");
 
+        // The app order to keep: ours from before (an update starts the launcher clean), or the order the TV's own
+        // Google TV home had. Handed to the launcher after the install (order-import.txt, OrderImport there).
+        String order = "";
+        if (!dry) {
+            order = sh("cat " + FILES + "/order-backup.txt 2>/dev/null").trim();
+            if (!order.isEmpty()) say("סדר האפליקציות שלך נשמר: " + order.split("\n").length + " אפליקציות", "ok");
+            else order = googleTvOrder();
+        }
+
         progress = 5;
         stepTo("2. התקנת מסך הבית");
         if (dry) say("[ניסיון] מתקין את מסך הבית", "dry");
@@ -552,6 +675,7 @@ final class Kit implements WebServer.Handler {
         if (dry) say("[ניסיון] " + def + " גם כערכה הראשית", "dry");
         else pushTheme(def, "", o, place);
         if (!dry) {
+            if (!order.isEmpty()) put("order-import.txt", (order + "\n").getBytes(StandardCharsets.UTF_8), FILES, URI);
             restartHome();
             backInFront();
             sh(VOLUME_WATCHER, 20_000, 1);   // holding a volume key repeats quickly (the launcher's VolumeHold)
