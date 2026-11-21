@@ -11,6 +11,8 @@ trailer="
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 root=$(cd "$(dirname "$0")/.." && pwd)
+# The T: drive (subst) can disappear; the real folder works the same (publish.ps1 maps T: again by itself).
+[ -d "$root/cleanyourtv" ] || root="/c/Users/oranh/OneDrive/Desktop/מודים כי אני גאון/MAKREN420"
 committed=0
 for repo in cleanyourtv wallpaper-editor phone-kit; do
     dir="$root/$repo"
