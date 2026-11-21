@@ -60,6 +60,8 @@ final class Kit implements WebServer.Handler {
     volatile int progress;
     /** The last run was the red button's removal (the screen then says so, with no setup after it). */
     volatile boolean removed;
+    /** The last run was "Update the current pack" (updateOnly): done shows "updated", no setup screens. */
+    volatile boolean updated;
     /** Theme files sent so far and in all, for the bar while the themes go on. */
     private int filesDone, filesTotal;
     final List<String[]> log = new ArrayList<>();
@@ -193,6 +195,17 @@ final class Kit implements WebServer.Handler {
     }
 
     /** The red button: everything of ours off this TV, the TV's own home and settings back (removeAll). */
+    /** "Update the current pack": the newest launcher over the one on the TV, everything of the owner's kept. */
+    synchronized boolean startUpdate() {
+        if (running) return false;
+        try {
+            start(new JSONObject().put("update", true), false);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     synchronized boolean startRemove() {
         if (running) return false;
         try {
@@ -495,6 +508,30 @@ final class Kit implements WebServer.Handler {
         }
     }
 
+    /**
+     * "Update the current pack": the launcher inside this installer installed over the one on the TV (pm install -r,
+     * no pm clear), so the owner's name, place, photos, app order, theme choice and every setting stay; the theme
+     * files are left as they are (the owner's editor changes too). Then Home restarts and the volume watcher starts.
+     */
+    private void updateOnly() throws Exception {
+        if (!connectNow()) throw new IllegalStateException("לא מחובר לטלוויזיה");
+        if (!sh("pm path " + PKG).contains("package:")) {
+            throw new IllegalStateException("מסך הבית לא מותקן בטלוויזיה הזאת: ללחוץ \"התקן עכשיו\"");
+        }
+        progress = 3;
+        stepTo("מעדכן את מסך הבית (כל ההגדרות נשמרות)");
+        pushAsset("launcher.apk", "/data/local/tmp/kit.apk", 3, 70);
+        step = "מתקין את הגרסה החדשה… אם קפץ חלון אישור (Play Protect), לאשר אותו בשלט";
+        String result = sh("timeout 180 pm install -r -g /data/local/tmp/kit.apk; rm -f /data/local/tmp/kit.apk", 200_000, 2);
+        if (!result.contains("Success")) throw new IllegalStateException("העדכון נכשל: " + result.trim());
+        progress = 85;
+        stepTo("מפעיל מחדש את מסך הבית");
+        sh(VOLUME_WATCHER, 20_000, 1);
+        restartHome();
+        backInFront();
+        progress = 98;
+    }
+
     /** Starts (or restarts) the volume watcher; false when this TV's ADB does not answer. */
     boolean startVolumeWatcher() {
         try {
@@ -534,12 +571,15 @@ final class Kit implements WebServer.Handler {
             try {
                 say("מתחיל: " + Build.MANUFACTURER + " " + Build.MODEL + ", Android " + Build.VERSION.RELEASE, "info");
                 removed = options.optBoolean("remove");
+                updated = options.optBoolean("update");
                 if (removed) removeAll();
+                else if (updated) updateOnly();
                 else if (restore) restore();
                 else install(options);
                 done = true;
                 progress = 100;
-                say(options.optBoolean("remove") ? "הערכה הוסרה, הטלוויזיה חזרה למסך הבית המקורי"
+                say(updated ? "הערכה עודכנה: השם, המקום, התמונות, סדר האפליקציות וההגדרות נשמרו"
+                        : options.optBoolean("remove") ? "הערכה הוסרה, הטלוויזיה חזרה למסך הבית המקורי"
                         : restore ? "המקרן הוחזר למצב שלפני ההתקנה" : "ההתקנה הסתיימה", "ok");
             } catch (Throwable e) {
                 error = e.getMessage() == null ? e.toString() : e.getMessage();

@@ -56,7 +56,7 @@ public class MainActivity extends Activity {
     private TextView status, percent, title;
     private ProgressBar bar;
     private View barRow;
-    private Button go, remove;
+    private Button go, remove, update;
     private LinearLayout pairing;
     private volatile boolean checking;
     private long lastCheck;
@@ -71,7 +71,7 @@ public class MainActivity extends Activity {
         @Override
         public void run() {
             if (autoLeft <= 0 || kit.running || kit.done || isFinishing()) return;
-            status.setText("מעדכן את מסך הבית בעוד " + autoLeft + "…  (להסרה: הכפתור האדום למטה)");
+            status.setText("התקנה מלאה בעוד " + autoLeft + "…  (למטה: עדכון ששומר הכול, או הסרה)");
             if (--autoLeft == 0) {
                 pressed();
                 return;
@@ -91,8 +91,10 @@ public class MainActivity extends Activity {
                 && key != android.view.KeyEvent.KEYCODE_DPAD_CENTER && key != android.view.KeyEvent.KEYCODE_ENTER) {
             autoLeft = 0;
             handler.removeCallbacks(countdown);
-            status.setText("העדכון בוטל. \"התקן עכשיו\" מעדכן, הכפתור האדום מסיר את הערכה.");
-            if (key == android.view.KeyEvent.KEYCODE_DPAD_DOWN) remove.requestFocus();
+            status.setText("ההתקנה המלאה בוטלה. הכחול מעדכן ושומר הכול, \"התקן עכשיו\" מתקין מחדש, האדום מסיר.");
+            if (key == android.view.KeyEvent.KEYCODE_DPAD_DOWN) {
+                (update.getVisibility() == View.VISIBLE ? update : remove).requestFocus();
+            }
             return true;
         }
         return super.dispatchKeyEvent(event);
@@ -151,6 +153,35 @@ public class MainActivity extends Activity {
         goLp.topMargin = px(28);
         goLp.gravity = Gravity.CENTER_HORIZONTAL;
         root.addView(go, goLp);
+
+        // "Update the current pack": only on a TV that already has our launcher. The newest launcher over the one
+        // there, every setting of the owner's kept (Kit.updateOnly).
+        update = new Button(this);
+        update.setText("עדכון הערכה הנוכחית");
+        update.setAllCaps(false);
+        update.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        update.setTypeface(Typeface.DEFAULT_BOLD);
+        update.setTextColor(Color.WHITE);
+        GradientDrawable blue = pill(0xFF0A60D6);
+        update.setBackground(blue);
+        update.setPadding(px(40), px(12), px(40), px(12));
+        update.setOnFocusChangeListener((v, focused) -> {
+            if (focused && autoLeft > 0) {
+                autoLeft = 0;
+                handler.removeCallbacks(countdown);
+                status.setText("ההתקנה המלאה בוטלה. \"עדכון הערכה הנוכחית\" מעדכן ושומר את כל ההגדרות.");
+            }
+            blue.setColor(focused ? 0xFF2F80FF : 0xFF0A60D6);
+            blue.setStroke(px(3), focused ? Color.WHITE : 0x00FFFFFF);
+            v.animate().scaleX(focused ? 1.06f : 1f).scaleY(focused ? 1.06f : 1f).setDuration(150).start();
+        });
+        update.setOnClickListener(v -> updatePressed());
+        LinearLayout.LayoutParams updateLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        updateLp.topMargin = px(16);
+        updateLp.gravity = Gravity.CENTER_HORIZONTAL;
+        root.addView(update, updateLp);
+        update.setVisibility(launcherInstalled() ? View.VISIBLE : View.GONE);
 
         // The bar: 1 to 100, green on a dim track, with the number beside it.
         LinearLayout row = new LinearLayout(this);
@@ -238,7 +269,13 @@ public class MainActivity extends Activity {
         handler.post(tick);
         // Opening the app is the press: the install starts by itself a moment after the screen is up (the button stays
         // for trying again).
-        if (!kit.running && !kit.done && !waiting) {
+        boolean carryOnUpdate = getSharedPreferences("kit_ui", MODE_PRIVATE).getBoolean("pending_update", false);
+        if (carryOnUpdate) getSharedPreferences("kit_ui", MODE_PRIVATE).edit().putBoolean("pending_update", false).commit();
+        if (carryOnUpdate && !kit.running && !kit.done && launcherInstalled()) {
+            // This app was just replaced by its newer version in the middle of "Update the current pack": go on.
+            update.requestFocus();
+            handler.postDelayed(this::updatePressed, 500);
+        } else if (!kit.running && !kit.done && !waiting) {
             status.setTextColor(0xFFC9CDD6);
             if (launcherInstalled()) {
                 // Already on this TV: a few seconds to choose the red button instead of the update.
@@ -287,6 +324,41 @@ public class MainActivity extends Activity {
                 }
             });
         }, "kit-go").start();
+    }
+
+    /**
+     * "Update the current pack": this app's own newer version first (from the link; it reopens and carries on by
+     * itself), then the newest launcher over the one on the TV, every setting kept.
+     */
+    private void updatePressed() {
+        autoLeft = 0;
+        handler.removeCallbacks(countdown);
+        if (kit.running) return;
+        if (kit.done) {
+            kit.done = false;
+            kit.updated = false;
+            kit.removed = false;
+        }
+        title.setText("מעדכן את הערכה…");
+        status.setText("מתחבר לטלוויזיה…");
+        status.setTextColor(0xFFC9CDD6);
+        new Thread(() -> {
+            boolean ok = kit.connectNow();
+            getSharedPreferences("kit_ui", MODE_PRIVATE).edit().putBoolean("pending_update", true).commit();
+            if (ok && kit.updateIfNewer(text -> handler.post(() -> status.setText(text)))) return;
+            getSharedPreferences("kit_ui", MODE_PRIVATE).edit().putBoolean("pending_update", false).commit();
+            handler.post(() -> {
+                if (ok) {
+                    waiting = false;
+                    pairing.setVisibility(View.GONE);
+                    kit.startUpdate();
+                } else {
+                    show(pairing);
+                    status.setText("צריך קודם לאשר את החיבור בטלוויזיה, ואז ללחוץ שוב");
+                    status.setTextColor(0xFFFFD60A);
+                }
+            });
+        }, "kit-update").start();
     }
 
     /** The red button asks once more: it takes our home screen off the TV and puts the TV's own back. */
@@ -346,6 +418,11 @@ public class MainActivity extends Activity {
                 go.setText("מתקין…");
                 status.setTextColor(0xFFC9CDD6);
                 status.setText(kit.step + "\n" + last);
+            } else if (kit.done && kit.updated) {
+                title.setText("✓ הערכה עודכנה");
+                go.setText("למסך הבית");
+                status.setTextColor(0xFF30D158);
+                status.setText("השם, המקום, התמונות, סדר האפליקציות וההגדרות נשמרו.");
             } else if (kit.done && kit.removed) {
                 title.setText("✓ הערכה הוסרה");
                 go.setText("התקן מחדש");
