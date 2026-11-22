@@ -224,7 +224,12 @@ final class Kit implements WebServer.Handler {
     /** Where the newest installer is: the GitHub Pages site deploy.py uploads to (assets/site.txt), then OLD_SITE. */
     private String[] sites() {
         try (InputStream in = context.getAssets().open("site.txt")) {
-            String site = new String(in.readAllBytes(), StandardCharsets.UTF_8).trim();
+            // Read by hand: InputStream.readAllBytes() only exists from Android 13, and on Android 12 (a TCL) the
+            // missing method crashed every button that checks for a newer installer.
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[1024];
+            for (int n; (n = in.read(buf)) > 0; ) bytes.write(buf, 0, n);
+            String site = new String(bytes.toByteArray(), StandardCharsets.UTF_8).trim();
             if (site.startsWith("https://")) return new String[]{site, OLD_SITE};
         } catch (IOException none) {
             // built without one
