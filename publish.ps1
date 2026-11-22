@@ -35,8 +35,13 @@ try {
     $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
     $env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=Windows-ROOT'
     Push-Location T:\cleanyourtv\launcher
-    & .\gradlew.bat assembleRelease -q --console=plain *>&1 | Out-File $log -Append -Encoding utf8
-    $launcherOk = $LASTEXITCODE -eq 0
+    # Up to 3 tries: OneDrive sometimes holds a build file for a moment (R8's classes.dex "used by another process").
+    $launcherOk = $false
+    for ($try = 1; $try -le 3 -and -not $launcherOk; $try++) {
+        if ($try -gt 1) { Say "launcher build retry $try"; Start-Sleep -Seconds 10 }
+        & .\gradlew.bat assembleRelease -q --console=plain *>&1 | Out-File $log -Append -Encoding utf8
+        $launcherOk = $LASTEXITCODE -eq 0
+    }
     Pop-Location
     if (-not $launcherOk) { throw 'the launcher did not build' }
     Copy-Item T:\cleanyourtv\launcher\app\build\outputs\apk\release\app-release.apk 'T:\ערכה-לחבר\מערכת\launcher.apk' -Force
