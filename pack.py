@@ -48,9 +48,9 @@ def main():
     # from pages-site.json (git-ignored); site.txt is git-ignored too.
     site_file = os.path.join(HERE, "pages-site.json")
     sys.path.insert(0, HERE)
-    from deploy import pages_site
-    site = pages_site(site_file)[0] if os.path.isfile(site_file) else ""
-    open(os.path.join(ASSETS, "site.txt"), "w", encoding="utf-8").write(site)
+    from deploy import pages_sites
+    sites = [site for site, _ in pages_sites(site_file)] if os.path.isfile(site_file) else []
+    open(os.path.join(ASSETS, "site.txt"), "w", encoding="utf-8").write("\n".join(sites))
     size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(ASSETS) for f in fs)
     slots = sorted(n for n in os.listdir(os.path.join(ASSETS, "library")) if os.path.isdir(os.path.join(ASSETS, "library", n)))
     print("packed", ", ".join(slots), "-", round(size / 1048576, 1), "MB")

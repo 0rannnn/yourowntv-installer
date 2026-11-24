@@ -231,8 +231,15 @@ final class Kit implements WebServer.Handler {
             java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
             byte[] buf = new byte[1024];
             for (int n; (n = in.read(buf)) > 0; ) bytes.write(buf, 0, n);
-            String site = new String(bytes.toByteArray(), StandardCharsets.UTF_8).trim();
-            if (site.startsWith("https://")) return new String[]{site, OLD_SITE};
+            // One address per line (deploy.py uploads to each; the first is the one older installers know).
+            List<String> out = new ArrayList<>();
+            for (String site : new String(bytes.toByteArray(), StandardCharsets.UTF_8).split("\n")) {
+                if (site.trim().startsWith("https://")) out.add(site.trim());
+            }
+            if (!out.isEmpty()) {
+                out.add(OLD_SITE);
+                return out.toArray(new String[0]);
+            }
         } catch (IOException none) {
             // built without one
         }
