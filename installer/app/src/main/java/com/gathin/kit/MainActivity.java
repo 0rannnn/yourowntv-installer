@@ -543,6 +543,11 @@ public class MainActivity extends Activity {
                 go.setText("התקן מחדש");
                 status.setTextColor(0xFF30D158);
                 status.setText("הטלוויזיה חזרה למסך הבית המקורי. אפשר להסיר גם את האפליקציה הזאת.");
+            } else if (kit.done && trial) {
+                // A trial ends here: no setup screens (whatever is typed there goes onto the TV for real).
+                title.setText("✓ הניסיון הסתיים");
+                status.setTextColor(0xFF30D158);
+                status.setText("שום דבר לא השתנה בטלוויזיה. כל השלבים עברו בהצלחה.");
             } else if (kit.done) {
                 if (!setupStarted) {
                     // A moment on 100/100, then the setup: name, place, photos.
