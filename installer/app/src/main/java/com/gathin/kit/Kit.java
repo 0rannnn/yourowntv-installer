@@ -183,6 +183,18 @@ final class Kit implements WebServer.Handler {
     // ---- the run --------------------------------------------------------------------------------------------
 
     /** The TV's own "install now" button: everything with the usual choices, no phone needed once connected. */
+    /** "Install now" as a trial: the same choices as startAuto, but every step only says what it would do (dry). */
+    synchronized boolean startTrial() {
+        if (running) return false;
+        try {
+            start(new JSONObject().put("screensaver", true).put("block_google", true).put("default", "apple")
+                    .put("dry", true), false);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     synchronized boolean startAuto() {
         if (running) return false;
         try {
@@ -718,16 +730,23 @@ final class Kit implements WebServer.Handler {
 
         progress = 2;
         stepTo("1. גיבוי של המצב הנוכחי");
-        File backup = new File(context.getExternalFilesDir(null), "backups/" + new SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.ROOT).format(new Date()));
-        if (!backup.mkdirs() && !backup.isDirectory()) throw new IOException("אין מקום לגיבוי");
-        write(new File(backup, "packages.txt"), sh("pm list packages"));
-        write(new File(backup, "disabled-before.txt"), sh("pm list packages -d"));
-        String home0 = sh("cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1");
-        String saver0 = sh("settings get secure screensaver_components");
-        String dns0 = sh("settings get global private_dns_mode") + "|" + sh("settings get global private_dns_specifier");
-        JSONObject state = new JSONObject().put("home", home0).put("screensaver", saver0).put("dns", dns0).put("lists", new JSONArray());
-        write(new File(backup, "state.json"), state.toString(2));
-        say("נשמר", "ok");
+        // A trial writes no backup: "remove" restores from the newest one, and a trial's snapshot (our launcher
+        // already in) would then replace the TV's real starting point.
+        File backup = null;   // none in a trial: nothing is written for "remove" to restore from
+        JSONObject state = new JSONObject().put("lists", new JSONArray());
+        if (dry) say("[ניסיון] גיבוי של המצב הנוכחי", "dry");
+        else {
+            backup = new File(context.getExternalFilesDir(null), "backups/" + new SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.ROOT).format(new Date()));
+            if (!backup.mkdirs() && !backup.isDirectory()) throw new IOException("אין מקום לגיבוי");
+            write(new File(backup, "packages.txt"), sh("pm list packages"));
+            write(new File(backup, "disabled-before.txt"), sh("pm list packages -d"));
+            String home0 = sh("cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1");
+            String saver0 = sh("settings get secure screensaver_components");
+            String dns0 = sh("settings get global private_dns_mode") + "|" + sh("settings get global private_dns_specifier");
+            state = new JSONObject().put("home", home0).put("screensaver", saver0).put("dns", dns0).put("lists", new JSONArray());
+            write(new File(backup, "state.json"), state.toString(2));
+            say("נשמר", "ok");
+        }
 
         // The app order to keep: ours from before (an update starts the launcher clean), or the order the TV's own
         // Google TV home had. Handed to the launcher after the install (order-import.txt, OrderImport there).
@@ -850,7 +869,7 @@ final class Kit implements WebServer.Handler {
                 packages.removeIf(p -> p.contains("setupwraith"));
                 say("setupwraith מחזיק את רשת ה-Wi-Fi: הוא נשאר פעיל", "warn");
             }
-            write(new File(backup, file), String.join("\n", packages) + "\n");
+            if (backup != null) write(new File(backup, file), String.join("\n", packages) + "\n");
             for (String p : packages) {
                 if (PROTECTED.matcher(p).matches()) {
                     say(p + " מוגן, לא מושבת", "warn");
@@ -860,7 +879,7 @@ final class Kit implements WebServer.Handler {
                 else say(p + ": " + sh("pm disable-user --user 0 " + p), "info");
             }
             state.getJSONArray("lists").put(file);
-            write(new File(backup, "state.json"), state.toString(2));
+            if (backup != null) write(new File(backup, "state.json"), state.toString(2));
         }
 
         progress = 95;
@@ -872,9 +891,11 @@ final class Kit implements WebServer.Handler {
                 String dreamx = "com.google.android.apps.tv.dreamx";
                 if (dry) say("[ניסיון] משבית את שומר המסך של Google", "dry");
                 else sh("pm disable-user --user 0 " + dreamx);
-                write(new File(backup, "4-google-screensaver.txt"), dreamx + "\n");
                 state.getJSONArray("lists").put("4-google-screensaver.txt");
-                write(new File(backup, "state.json"), state.toString(2));
+                if (backup != null) {
+                    write(new File(backup, "4-google-screensaver.txt"), dreamx + "\n");
+                    write(new File(backup, "state.json"), state.toString(2));
+                }
             }
         }
         if (o.optBoolean("dns")) {

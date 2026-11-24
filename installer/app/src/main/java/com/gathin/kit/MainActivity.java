@@ -66,6 +66,8 @@ public class MainActivity extends Activity {
     private LinearLayout pairing;
     /** The line under the title; it makes room while the one-time steps show. */
     private TextView sub;
+    /** A trial run: "Install now" only says what it would do (onCreate, the "trial" extra). */
+    private boolean trial;
     /** The setup steps' number badges (markSteps). */
     private TextView stepDev, stepAdb;
     private volatile boolean checking;
@@ -332,6 +334,19 @@ public class MainActivity extends Activity {
             markSteps();
             return;
         }
+        // A trial run (adb shell am start ... --ez trial true): "Install now" does everything a real press does,
+        // bringing this app up to the newest version included, but the install itself only says what it would do.
+        // It carries over the self-update (pending_trial), so a test on a TV that has the pack changes nothing there.
+        SharedPreferences uiPrefs = getSharedPreferences("kit_ui", MODE_PRIVATE);
+        trial = getIntent().getBooleanExtra("trial", false) || uiPrefs.getBoolean("pending_trial", false);
+        uiPrefs.edit().putBoolean("pending_trial", false).commit();
+        if (getIntent().getBooleanExtra("trial", false)) {
+            status.setTextColor(0xFFFFD60A);
+            status.setText("מצב ניסיון: שום דבר לא ישתנה בטלוויזיה");
+            go.requestFocus();
+            handler.postDelayed(this::pressed, 1500);
+            return;
+        }
         boolean carryOnUpdate = getSharedPreferences("kit_ui", MODE_PRIVATE).getBoolean("pending_update", false);
         if (carryOnUpdate) getSharedPreferences("kit_ui", MODE_PRIVATE).edit().putBoolean("pending_update", false).commit();
         boolean carryOnInstall = getSharedPreferences("kit_ui", MODE_PRIVATE).getBoolean("pending_install", false);
@@ -393,14 +408,15 @@ public class MainActivity extends Activity {
             // A newer installer online (every commit publishes one): it replaces this app first, whatever version was
             // downloaded, and the new one goes on with the install by itself (pending_install, read in onCreate).
             SharedPreferences ui = getSharedPreferences("kit_ui", MODE_PRIVATE);
-            ui.edit().putBoolean("pending_install", true).commit();
+            ui.edit().putBoolean("pending_install", true).putBoolean("pending_trial", trial).commit();
             if (ok && kit.updateIfNewer(text -> handler.post(() -> status.setText(text)))) return;
-            ui.edit().putBoolean("pending_install", false).commit();
+            ui.edit().putBoolean("pending_install", false).putBoolean("pending_trial", false).commit();
             handler.post(() -> {
                 if (ok) {
                     waiting = false;
                     pairing.setVisibility(View.GONE);
-                    kit.startAuto();
+                    if (trial) kit.startTrial();
+                    else kit.startAuto();
                 } else {
                     waiting = true;
                     show(pairing);
