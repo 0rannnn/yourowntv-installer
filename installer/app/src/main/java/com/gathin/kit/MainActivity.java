@@ -24,6 +24,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
@@ -55,6 +56,11 @@ public class MainActivity extends Activity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private TextView status, percent, title;
     private ProgressBar bar;
+    /** The light sweeping along the bar while it works, and its animation (null while still). */
+    private View shine;
+    private ObjectAnimator sweep;
+    /** Top right: the versions (showVersions). */
+    private TextView versions;
     private View barRow;
     private Button go, remove, update;
     private LinearLayout pairing;
@@ -190,7 +196,22 @@ public class MainActivity extends Activity {
         bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(1000);
         bar.setProgressDrawable(barDrawable());
-        row.addView(bar, new LinearLayout.LayoutParams(0, px(14), 1f));
+        // A light sweeping along the bar the whole time it works (the download, the install): it is never still.
+        FrameLayout barBox = new FrameLayout(this);
+        barBox.setClipToOutline(true);
+        barBox.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, android.graphics.Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), px(7));
+            }
+        });
+        barBox.addView(bar, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        shine = new View(this);
+        shine.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{0x00FFFFFF, 0x80FFFFFF, 0x00FFFFFF}));
+        barBox.addView(shine, new FrameLayout.LayoutParams(px(160), FrameLayout.LayoutParams.MATCH_PARENT));
+        shine.setVisibility(View.GONE);
+        row.addView(barBox, new LinearLayout.LayoutParams(0, px(14), 1f));
         percent = line("", 22, Color.WHITE, true);
         percent.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams percentLp = new LinearLayout.LayoutParams(px(110), LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -258,7 +279,34 @@ public class MainActivity extends Activity {
         root.addView(pairing, pairLp);
         pairing.setVisibility(waiting ? View.VISIBLE : View.GONE);
 
-        setContentView(root);
+        // Top right: the newest version online, the one of this app (what was downloaded) and the one on the TV.
+        FrameLayout frame = new FrameLayout(this);
+        frame.setBackgroundColor(0xFF101218);
+        frame.addView(root, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        versions = line("", 15, 0xFF9AA0AD, false);
+        versions.setGravity(Gravity.RIGHT);
+        FrameLayout.LayoutParams versionsLp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.RIGHT);
+        versionsLp.topMargin = px(22);
+        versionsLp.rightMargin = px(30);
+        frame.addView(versions, versionsLp);
+        showVersions(-2);
+        new Thread(() -> {
+            int online = kit.onlineVersion();
+            handler.post(() -> {
+                showVersions(online);
+                // The TV already has the newest pack: nothing to install. The full install that was about to start
+                // by itself stops (the buttons stay, for anyone who wants it anyway).
+                int onTv = Kit.installedVersion(this, "com.gathin.tvhome");
+                if (online > 0 && onTv >= online && !kit.running && !kit.done) {
+                    autoLeft = 0;
+                    handler.removeCallbacks(countdown);
+                    status.setTextColor(0xFF30D158);
+                    status.setText("אין צורך להתקין את הגרסה החדשה, מעודכן לגרסה הכי חדשה");
+                }
+            });
+        }, "kit-version").start();
+        setContentView(frame);
         // The TV must not go to sleep (and drop Wi-Fi, and with it the connection) in the middle of an install.
         getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         // The screen eases in rather than appearing at once.
@@ -288,6 +336,16 @@ public class MainActivity extends Activity {
                 }, 700);
             }
         }
+    }
+
+    /** The three versions, top right; online is -2 while it is being checked and -1 when no host answered. */
+    private void showVersions(int online) {
+        int mine = Kit.installedVersion(this, getPackageName());
+        int onTv = Kit.installedVersion(this, "com.gathin.tvhome");
+        String newest = online == -2 ? "בודק…" : online == -1 ? "אין חיבור" : online == 0 ? "לא ידועה" : String.valueOf(online);
+        versions.setText("גרסה אחרונה: " + newest
+                + "\nהגרסה שהורדת: " + (mine < 0 ? "ישנה" : String.valueOf(mine))
+                + "\nמותקנת בטלוויזיה: " + (onTv >= 0 ? String.valueOf(onTv) : launcherInstalled() ? "ישנה" : "לא מותקנת"));
     }
 
     /** "Install now": connect, and go; not connected yet, show the one-time pairing and start once it is done. */
@@ -398,9 +456,23 @@ public class MainActivity extends Activity {
             synchronized (kit) {
                 if (!kit.log.isEmpty()) last = kit.log.get(kit.log.size() - 1)[2];
             }
-            if (kit.running || kit.done || kit.error != null) {
+            int downloading = kit.downloadPct;
+            if (downloading >= 0 || kit.running || kit.done || kit.error != null) {
                 if (barRow.getVisibility() != View.VISIBLE) show(barRow);
-                int p = Math.max(1, Math.min(100, kit.progress));
+                boolean working = downloading >= 0 || kit.running;
+                if (working && sweep == null) {
+                    shine.setVisibility(View.VISIBLE);
+                    sweep = ObjectAnimator.ofFloat(shine, "translationX", -px(160), px(820));
+                    sweep.setDuration(1300);
+                    sweep.setRepeatCount(ObjectAnimator.INFINITE);
+                    sweep.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
+                    sweep.start();
+                } else if (!working && sweep != null) {
+                    sweep.cancel();
+                    sweep = null;
+                    shine.setVisibility(View.GONE);
+                }
+                int p = Math.max(1, Math.min(100, downloading >= 0 ? downloading : kit.progress));
                 if (p != shown) {
                     // Glide to the new value instead of jumping.
                     shown = p;

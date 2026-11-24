@@ -58,6 +58,8 @@ final class Kit implements WebServer.Handler {
     volatile String error, step = "";
     /** How far the run is, 0 to 100, for the bar on the TV and on the phone. */
     volatile int progress;
+    /** While this app downloads its newer version (updateIfNewer): 0 to 100; -1 the rest of the time. */
+    volatile int downloadPct = -1;
     /** The last run was the red button's removal (the screen then says so, with no setup after it). */
     volatile boolean removed;
     /** The last run was "Update the current pack" (updateOnly): done shows "updated", no setup screens. */
@@ -238,6 +240,32 @@ final class Kit implements WebServer.Handler {
     }
 
     /**
+     * The pack's version online (version.json's "version", the number both apps are built with); 0 when the host
+     * answers but gives no number (an upload from before the numbers), -1 when no host answers. Network: call it off
+     * the main thread.
+     */
+    int onlineVersion() {
+        for (String s : sites()) {
+            try {
+                return new JSONObject(new String(fetch(s + "/version.json", 8_000), StandardCharsets.UTF_8)).optInt("version", 0);
+            } catch (Exception tryNext) {
+                // this host is not answering: the next one
+            }
+        }
+        return -1;
+    }
+
+    /** The version of a package on this TV when it is a pack number ("75"), else -1 (not installed, or older builds). */
+    static int installedVersion(Context context, String pkg) {
+        try {
+            String name = context.getPackageManager().getPackageInfo(pkg, 0).versionName;
+            return name != null && name.matches("\\d+") ? Integer.parseInt(name) : -1;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /**
      * When the installer online (SITE/version.json, written by deploy.py on every commit) is not this one, it is
      * downloaded and installed over this app, which then starts again by itself (this call never comes back then).
      * Returns false when there is nothing newer or anything goes wrong (no internet, no connection to the TV): carry on
@@ -263,6 +291,7 @@ final class Kit implements WebServer.Handler {
             say("גרסה חדשה של המתקין מ-" + site + " (" + online.optString("built") + ")", "info");
             flushLog();
             File apk = new File(context.getExternalFilesDir(null), "update.apk");
+            downloadPct = 0;
             try (InputStream in = open(site + "/tv.apk", 20_000); OutputStream out = new java.io.FileOutputStream(apk)) {
                 byte[] buffer = new byte[65536];
                 long total = Math.max(1, online.optLong("size", 20_000_000)), got = 0;
@@ -271,12 +300,14 @@ final class Kit implements WebServer.Handler {
                     out.write(buffer, 0, n);
                     got += n;
                     int pct = (int) Math.min(100, got * 100 / total);
+                    downloadPct = pct;
                     if (pct != last && pct % 5 == 0) {
                         last = pct;
                         status.accept("מוריד את הגרסה החדשה של המתקין… " + pct + "/100");
                     }
                 }
             }
+            downloadPct = 100;
             if (!want.equalsIgnoreCase(sha256(apk))) return false;   // a broken download: keep this version
             if (!connectNow()) return false;
             status.accept("מתקין את הגרסה החדשה של המתקין…");
@@ -297,6 +328,8 @@ final class Kit implements WebServer.Handler {
             return false;   // still here a minute later: the update did not go in, carry on with this version
         } catch (Exception e) {
             return false;
+        } finally {
+            downloadPct = -1;
         }
     }
 

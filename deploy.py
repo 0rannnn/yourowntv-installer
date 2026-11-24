@@ -44,6 +44,19 @@ def pages_site(path):
     return site, "https://github.com/%s/%s.git" % (user, repo)
 
 
+def pack_version():
+    """The pack's version, the number both apps are built with (their build.gradle counts the same way): every commit
+    of phone-kit and wallpaper-editor plus the launcher's own since the original project. None without git."""
+    work = os.path.dirname(HERE)
+    try:
+        def count(repo, rng):
+            return int(subprocess.run(["git", "-C", os.path.join(work, repo), "rev-list", "--count", rng],
+                                      check=True, capture_output=True, text=True).stdout.strip())
+        return count("cleanyourtv", "origin/main..HEAD") + count("phone-kit", "HEAD") + count("wallpaper-editor", "HEAD")
+    except Exception:
+        return None
+
+
 def git(*args):
     return subprocess.run(["git", "-C", REPO, *args], check=True, capture_output=True, text=True).stdout
 
@@ -65,6 +78,9 @@ def main():
     except Exception:
         pass
     version = {"sha256": digest, "size": os.path.getsize(apk), "built": time.strftime("%Y-%m-%d %H:%M")}
+    number = pack_version()
+    if number is not None:
+        version["version"] = number   # the installers show it, and say when the TV already has the newest
     json.dump(version, open(os.path.join(WEB, "version.json"), "w", encoding="utf-8"))
 
     if not os.path.isdir(os.path.join(REPO, ".git")):
