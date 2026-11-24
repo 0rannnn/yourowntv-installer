@@ -294,6 +294,10 @@ final class Kit implements WebServer.Handler {
         try {
             String want = online.optString("sha256");
             if (want.isEmpty() || want.equalsIgnoreCase(sha256(new File(context.getApplicationInfo().sourceDir)))) return false;
+            // By the version number when both have one: only a newer one replaces this app, never an older one (a
+            // test build here, or a host that has not caught up yet).
+            int newest = online.optInt("version", 0), mine = installedVersion(context, context.getPackageName());
+            if (newest > 0 && mine > 0 && mine >= newest) return false;
             status.accept("יש גרסה חדשה של המתקין, מורידה…");
             say("גרסה חדשה של המתקין מ-" + site + " (" + online.optString("built") + ")", "info");
             flushLog();

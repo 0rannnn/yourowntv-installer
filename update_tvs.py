@@ -41,7 +41,14 @@ def main():
         host = tv.get("host", "")
         if host and host not in hosts:
             hosts.append(host)
+    # skip-tvs.txt (git-ignored), one host per line: TVs left as they are, e.g. one kept on an older version to test
+    # that it brings itself up to date.
+    skip_file = os.path.join(HERE, "skip-tvs.txt")
+    skip = set(open(skip_file, encoding="utf-8").read().split()) if os.path.isfile(skip_file) else set()
     for host in hosts:
+        if host in skip:
+            print(host + ": ברשימת הדילוג (skip-tvs.txt), לא נגעתי")
+            continue
         try:
             if "connected" not in adb("connect", host, timeout=8) or "device" not in adb("-s", host, "get-state", timeout=8):
                 print(host + ": לא עונה, דילוג")

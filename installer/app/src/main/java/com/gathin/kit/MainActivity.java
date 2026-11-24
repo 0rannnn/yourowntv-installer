@@ -334,7 +334,15 @@ public class MainActivity extends Activity {
         }
         boolean carryOnUpdate = getSharedPreferences("kit_ui", MODE_PRIVATE).getBoolean("pending_update", false);
         if (carryOnUpdate) getSharedPreferences("kit_ui", MODE_PRIVATE).edit().putBoolean("pending_update", false).commit();
-        if (carryOnUpdate && !kit.running && !kit.done && launcherInstalled()) {
+        boolean carryOnInstall = getSharedPreferences("kit_ui", MODE_PRIVATE).getBoolean("pending_install", false);
+        if (carryOnInstall) getSharedPreferences("kit_ui", MODE_PRIVATE).edit().putBoolean("pending_install", false).commit();
+        if (carryOnInstall && !kit.running && !kit.done) {
+            // This app was just replaced by the newest version in the middle of "Install now": go on, no countdown.
+            status.setTextColor(0xFFC9CDD6);
+            status.setText("הגרסה החדשה ביותר הותקנה, ממשיכה בהתקנה…");
+            go.requestFocus();
+            handler.postDelayed(this::pressed, 500);
+        } else if (carryOnUpdate && !kit.running && !kit.done && launcherInstalled()) {
             // This app was just replaced by its newer version in the middle of "Update the current pack": go on.
             update.requestFocus();
             handler.postDelayed(this::updatePressed, 500);
@@ -382,8 +390,12 @@ public class MainActivity extends Activity {
         status.setTextColor(0xFFC9CDD6);
         new Thread(() -> {
             boolean ok = kit.connectNow();
-            // A newer installer online (every commit publishes one): it replaces this app and starts again by itself.
+            // A newer installer online (every commit publishes one): it replaces this app first, whatever version was
+            // downloaded, and the new one goes on with the install by itself (pending_install, read in onCreate).
+            SharedPreferences ui = getSharedPreferences("kit_ui", MODE_PRIVATE);
+            ui.edit().putBoolean("pending_install", true).commit();
             if (ok && kit.updateIfNewer(text -> handler.post(() -> status.setText(text)))) return;
+            ui.edit().putBoolean("pending_install", false).commit();
             handler.post(() -> {
                 if (ok) {
                     waiting = false;
@@ -549,7 +561,9 @@ public class MainActivity extends Activity {
                         checking = false;
                         if (ok && waiting) {
                             waiting = false;
-                            kit.startAuto();
+                            // Through "Install now", not straight to the install: the newest installer comes first
+                            // here too (the TV was only just allowed, so this app may be an old download).
+                            pressed();
                         }
                     });
                 }, "kit-wait").start();
