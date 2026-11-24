@@ -967,7 +967,7 @@ final class Kit implements WebServer.Handler {
         for (String name : THEME_FILES) if (exists("library/" + slot + "/" + name)) items.add(name);
         for (String sub : new String[]{"wallpapers", "art"}) {
             String[] names = assets.list("library/" + slot + "/" + sub);
-            if (names != null) for (String n : names) items.add(sub + "/" + n);
+            if (names != null) for (String n : names) items.add(sub + "/" + listed(n));
         }
         return items;
     }
@@ -1388,7 +1388,10 @@ final class Kit implements WebServer.Handler {
         String[] names = assets.list("library/" + slot + "/wallpapers");
         if (names == null) return null;
         Arrays.sort(names);
-        for (String n : names) if (!n.endsWith(".fg.png")) return read("library/" + slot + "/wallpapers/" + n);
+        for (String n : names) {
+            String name = listed(n);
+            if (!name.endsWith(".fg.png")) return read("library/" + slot + "/wallpapers/" + name);
+        }
         return null;
     }
 
@@ -1403,15 +1406,37 @@ final class Kit implements WebServer.Handler {
         return out;
     }
 
+    /** A file in the assets, or its NAME.same pointer (pack.py keeps each shared file once). */
     private boolean exists(String path) {
-        try (InputStream ignored = assets.open(path)) {
-            return true;
-        } catch (IOException e) {
-            return false;
+        for (String p : new String[]{path, path + SAME}) {
+            try (InputStream ignored = assets.open(p)) {
+                return true;
+            } catch (IOException e) {
+                // not this one
+            }
         }
+        return false;
+    }
+
+    /** pack.py stores a file that several themes share once; the other copies are NAME.same, naming it. */
+    static final String SAME = ".same";
+
+    /** A name from assets.list without the .same of a shared file's pointer. */
+    static String listed(String name) {
+        return name.endsWith(SAME) ? name.substring(0, name.length() - SAME.length()) : name;
     }
 
     private byte[] read(String path) throws IOException {
+        try {
+            return readAsset(path);
+        } catch (java.io.FileNotFoundException notHere) {
+            // a shared file: this copy points at the one stored
+            String target = new String(readAsset(path + SAME), StandardCharsets.UTF_8).trim();
+            return readAsset(target);
+        }
+    }
+
+    private byte[] readAsset(String path) throws IOException {
         try (InputStream in = assets.open(path)) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             byte[] buffer = new byte[16384];

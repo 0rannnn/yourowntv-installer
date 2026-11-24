@@ -64,6 +64,10 @@ public class MainActivity extends Activity {
     private View barRow;
     private Button go, remove, update;
     private LinearLayout pairing;
+    /** The line under the title; it makes room while the one-time steps show. */
+    private TextView sub;
+    /** The setup steps' number badges (markSteps). */
+    private TextView stepDev, stepAdb;
     private volatile boolean checking;
     private long lastCheck;
     /** The value the bar is sliding to, 0 to 100; the bar itself counts in tenths so it glides. */
@@ -141,7 +145,7 @@ public class MainActivity extends Activity {
         title = line("התקנת מסך הבית", 36, Color.WHITE, true);
         title.setGravity(Gravity.CENTER);
         root.addView(title);
-        TextView sub = line("הכול מותקן לבד, תוך כמה שניות. לא לכבות את הטלוויזיה עד הסוף.", 18, 0xFFC9CDD6, false);
+        sub = line("הכול מותקן לבד, תוך כמה שניות. לא לכבות את הטלוויזיה עד הסוף.", 18, 0xFFC9CDD6, false);
         sub.setGravity(Gravity.CENTER);
         root.addView(sub);
 
@@ -261,17 +265,21 @@ public class MainActivity extends Activity {
         pairing = new LinearLayout(this);
         pairing.setOrientation(LinearLayout.HORIZONTAL);
         pairing.setGravity(Gravity.CENTER);
+        // One time only, in three steps the TV checks by itself: each has a button to the exact settings screen, and
+        // a step done turns green with a check. Then the install goes on alone (tick looks every 3 s).
         LinearLayout steps = new LinearLayout(this);
         steps.setOrientation(LinearLayout.VERTICAL);
-        steps.addView(line("הטלוויזיה עוד לא אישרה את החיבור", 22, Color.WHITE, true));
-        steps.addView(line("הכי פשוט: הגדרות > מערכת > אפשרויות למפתחים > להדליק \"ניפוי באגים ב-USB\". "
-                + "יקפוץ חלון \"לאפשר?\": לסמן \"אפשר תמיד\" ולאשר. ההתקנה מתחילה לבד.", 17, 0xFFC9CDD6, false));
-        steps.addView(line("אם החלון לא קופץ (רק בחלק מהטלוויזיות): סורקים את הקוד בטלפון, ובטלוויזיה "
-                + "ניפוי באגים אלחוטי > צימוד עם קוד, ומקלידים בטלפון את 6 הספרות.", 15, 0xFF9AA0AD, false));
+        steps.addView(line("פעם אחת בלבד: לאשר לאפליקציה לעבוד על הטלוויזיה", 22, Color.WHITE, true));
+        stepDev = stepRow(steps, "1", "להדליק אפשרויות מפתחים: במסך שנפתח, 7 לחיצות ברצף על \"גרסת מערכת ההפעלה\"",
+                "פתח את המסך", () -> openSettings(android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS));
+        stepAdb = stepRow(steps, "2", "במסך שנפתח, להדליק \"ניפוי באגים ב-USB\"",
+                "פתח את המסך", () -> openSettings(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
+        stepRow(steps, "3", "בחלון שקופץ: לסמן \"אפשר תמיד\" וללחוץ אישור. ההתקנה ממשיכה לבד.", null, null);
+        steps.addView(line("לא קופץ חלון? סורקים את הקוד בטלפון, ובטלוויזיה: ניפוי באגים אלחוטי > צימוד עם קוד.", 15, 0xFF9AA0AD, false));
         pairing.addView(steps, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         ImageView qr = new ImageView(this);
         qr.setImageBitmap(qrCode(url, 512));
-        LinearLayout.LayoutParams qrLp = new LinearLayout.LayoutParams(px(210), px(210));
+        LinearLayout.LayoutParams qrLp = new LinearLayout.LayoutParams(px(170), px(170));
         qrLp.rightMargin = px(36);
         pairing.addView(qr, 0, qrLp);
         LinearLayout.LayoutParams pairLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -317,6 +325,13 @@ public class MainActivity extends Activity {
         handler.post(tick);
         // Opening the app is the press: the install starts by itself a moment after the screen is up (the button stays
         // for trying again).
+        // A look at the one-time steps without touching the TV (adb shell am start ... --ez show_steps true): for
+        // screenshots of a TV that is already connected. Nothing starts by itself then.
+        if (getIntent().getBooleanExtra("show_steps", false)) {
+            show(pairing);
+            markSteps();
+            return;
+        }
         boolean carryOnUpdate = getSharedPreferences("kit_ui", MODE_PRIVATE).getBoolean("pending_update", false);
         if (carryOnUpdate) getSharedPreferences("kit_ui", MODE_PRIVATE).edit().putBoolean("pending_update", false).commit();
         if (carryOnUpdate && !kit.running && !kit.done && launcherInstalled()) {
@@ -515,6 +530,15 @@ public class MainActivity extends Activity {
                 status.setTextColor(0xFFFF453A);
                 status.setText("נעצר: " + kit.error);
             }
+            // The steps need the room: while they show, the buttons they don't need step aside.
+            boolean steps = pairing.getVisibility() == View.VISIBLE && pairing.getAlpha() > 0f;
+            if (steps) markSteps();
+            int others = steps ? View.GONE : View.VISIBLE;
+            if (remove.getVisibility() != others) remove.setVisibility(others);
+            if (sub.getVisibility() != others) sub.setVisibility(others);
+            if (steps && update.getVisibility() == View.VISIBLE) update.setVisibility(View.GONE);
+            if (!steps && update.getVisibility() == View.GONE && launcherInstalled()) update.setVisibility(View.VISIBLE);
+            if (steps && barRow.getVisibility() == View.INVISIBLE) barRow.setVisibility(View.GONE);
             long now = System.currentTimeMillis();
             if (waiting && !kit.running && !checking && now - lastCheck > 3000) {
                 lastCheck = now;
@@ -875,6 +899,84 @@ public class MainActivity extends Activity {
     }
 
     /** A part of the screen fades and rises in. */
+    /** A step of the one-time setup: its number (a check once done), the words, and a button to its screen. */
+    private TextView stepRow(LinearLayout parent, String number, String text, String button, Runnable action) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        TextView badge = new TextView(this);
+        badge.setText(number);
+        badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        badge.setTypeface(Typeface.DEFAULT_BOLD);
+        badge.setTextColor(Color.WHITE);
+        badge.setGravity(Gravity.CENTER);
+        GradientDrawable dot = new GradientDrawable();
+        dot.setShape(GradientDrawable.OVAL);
+        dot.setColor(0xFF3A3F4B);
+        badge.setBackground(dot);
+        row.addView(badge, new LinearLayout.LayoutParams(px(34), px(34)));
+        TextView words = line(text, 17, 0xFFE5E7EB, false);
+        words.setTextDirection(View.TEXT_DIRECTION_RTL);
+        LinearLayout.LayoutParams wordsLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        wordsLp.setMarginStart(px(14));
+        wordsLp.setMarginEnd(px(14));
+        row.addView(words, wordsLp);
+        if (button != null) {
+            Button open = new Button(this);
+            open.setText(button);
+            open.setAllCaps(false);
+            open.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            open.setTypeface(Typeface.DEFAULT_BOLD);
+            open.setTextColor(Color.WHITE);
+            GradientDrawable fill = pill(0xFF0A60D6);
+            open.setBackground(fill);
+            open.setPadding(px(24), px(8), px(24), px(8));
+            open.setOnFocusChangeListener((v, focused) -> {
+                fill.setColor(focused ? 0xFF2F80FF : 0xFF0A60D6);
+                fill.setStroke(px(3), focused ? Color.WHITE : 0x00FFFFFF);
+            });
+            open.setOnClickListener(v -> action.run());
+            row.addView(open);
+        }
+        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        rowLp.topMargin = px(12);
+        parent.addView(row, rowLp);
+        return badge;
+    }
+
+    /** A settings screen for the setup steps; some TVs do not have it, then Settings itself. */
+    private void openSettings(String action) {
+        try {
+            startActivity(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (Exception none) {
+            try {
+                startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /** The two steps the TV can tell are done: developer options on, USB debugging on. Green with a check then. */
+    private void markSteps() {
+        if (stepDev == null) return;
+        boolean dev = android.provider.Settings.Global.getInt(getContentResolver(),
+                android.provider.Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1;
+        boolean adb = android.provider.Settings.Global.getInt(getContentResolver(), android.provider.Settings.Global.ADB_ENABLED, 0) == 1;
+        markStep(stepDev, "1", dev || adb);
+        markStep(stepAdb, "2", adb);
+    }
+
+    private void markStep(TextView badge, String number, boolean done) {
+        String want = done ? "✓" : number;
+        if (want.contentEquals(badge.getText())) return;
+        badge.setText(want);
+        ((GradientDrawable) badge.getBackground()).setColor(done ? 0xFF30D158 : 0xFF3A3F4B);
+        badge.animate().scaleX(1.25f).scaleY(1.25f).setDuration(120)
+                .withEndAction(() -> badge.animate().scaleX(1f).scaleY(1f).setDuration(160).start()).start();
+    }
+
     private void show(View v) {
         if (v.getVisibility() == View.VISIBLE && v.getAlpha() == 1f) return;
         v.setAlpha(0f);

@@ -34,11 +34,18 @@ android {
         targetSdk 34
         versionCode packVersion ?: 1
         versionName packVersion != null ? String.valueOf(packVersion) : '1.0'
+        // TVs are ARM: the x86 copies of the native libraries were 1.9 MB of download for nothing.
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
     }
 
     buildTypes {
         release {
-            minifyEnabled false
+            // R8 shrinks the code: the installer went from 19 MB to about half, a faster download on every TV.
+            // proguard-rules.pro keeps the libraries reached by name or from native code (adb, Conscrypt, sun.security).
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             // Installed by hand through the Downloader app, not through a store: the debug key is enough.
             signingConfig signingConfigs.debug
         }
@@ -52,7 +59,9 @@ android {
             useLegacyPackaging true
         }
         resources {
-            excludes += ['META-INF/versions/9/OSGI-INF/MANIFEST.MF']
+            excludes += ['META-INF/versions/9/OSGI-INF/MANIFEST.MF',
+                         // BouncyCastle's post-quantum tables (1.2 MB): adb pairing uses only its AES-GCM and HKDF.
+                         'org/bouncycastle/pqc/**']
         }
     }
     // The themes and the launcher are packed into assets by pack.py; images and the APK are already compressed.
