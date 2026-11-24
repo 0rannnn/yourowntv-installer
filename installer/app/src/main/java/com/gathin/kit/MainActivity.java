@@ -546,6 +546,7 @@ public class MainActivity extends Activity {
             } else if (kit.done && trial) {
                 // A trial ends here: no setup screens (whatever is typed there goes onto the TV for real).
                 title.setText("✓ הניסיון הסתיים");
+                go.setText("התקן עכשיו");
                 status.setTextColor(0xFF30D158);
                 status.setText("שום דבר לא השתנה בטלוויזיה. כל השלבים עברו בהצלחה.");
             } else if (kit.done) {
