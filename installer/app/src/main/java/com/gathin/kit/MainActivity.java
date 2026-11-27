@@ -59,8 +59,6 @@ public class MainActivity extends Activity {
     /** The light sweeping along the bar while it works, and its animation (null while still). */
     private View shine;
     private ObjectAnimator sweep;
-    /** Top right: the versions (showVersions). */
-    private TextView versions;
     private View barRow;
     private Button go, remove, update;
     private LinearLayout pairing;
@@ -150,6 +148,20 @@ public class MainActivity extends Activity {
         sub = line("הכול מותקן לבד, תוך כמה שניות. לא לכבות את הטלוויזיה עד הסוף.", 18, 0xFFC9CDD6, false);
         sub.setGravity(Gravity.CENTER);
         root.addView(sub);
+
+        // The versions, three cards in a row (Oran, 2026-11-27: on the TV, online, and what it can be updated to).
+        LinearLayout cards = new LinearLayout(this);
+        cards.setOrientation(LinearLayout.HORIZONTAL);
+        cards.setGravity(Gravity.CENTER);
+        cards.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        onTvCard = versionCard(cards, "בטלוויזיה");
+        onlineCard = versionCard(cards, "באוויר");
+        targetCard = versionCard(cards, "עדכון");
+        LinearLayout.LayoutParams cardsLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        cardsLp.topMargin = px(22);
+        cardsLp.gravity = Gravity.CENTER_HORIZONTAL;
+        root.addView(cards, cardsLp);
 
         go = new Button(this);
         go.setText("התקן עכשיו");
@@ -289,17 +301,9 @@ public class MainActivity extends Activity {
         root.addView(pairing, pairLp);
         pairing.setVisibility(waiting ? View.VISIBLE : View.GONE);
 
-        // Top right: the newest version online, the one of this app (what was downloaded) and the one on the TV.
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(0xFF101218);
         frame.addView(root, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-        versions = line("", 15, 0xFF9AA0AD, false);
-        versions.setGravity(Gravity.RIGHT);
-        FrameLayout.LayoutParams versionsLp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.RIGHT);
-        versionsLp.topMargin = px(22);
-        versionsLp.rightMargin = px(30);
-        frame.addView(versions, versionsLp);
         showVersions(-2);
         new Thread(() -> {
             int online = kit.onlineVersion();
@@ -376,14 +380,73 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** The three versions, top right; online is -2 while it is being checked and -1 when no host answered. */
+    /**
+     * The three version cards; online is -2 while it is being checked and -1 when no host answered. What the TV can
+     * be updated to is the newer of the version online and this app's own pack: "Install" and "Update" bring this
+     * app up to the one online first (Kit.updateIfNewer), so the one online is what lands on the TV.
+     */
+    private int lastOnline = -2;
+
     private void showVersions(int online) {
+        lastOnline = online;
         int mine = Kit.installedVersion(this, getPackageName());
         int onTv = Kit.installedVersion(this, "com.gathin.tvhome");
-        String newest = online == -2 ? "בודק…" : online == -1 ? "אין חיבור" : online == 0 ? "לא ידועה" : String.valueOf(online);
-        versions.setText("גרסה אחרונה: " + newest
-                + "\nהגרסה שהורדת: " + (mine < 0 ? "ישנה" : String.valueOf(mine))
-                + "\nמותקנת בטלוויזיה: " + (onTv >= 0 ? String.valueOf(onTv) : launcherInstalled() ? "ישנה" : "לא מותקנת"));
+        boolean installed = launcherInstalled();
+        setCard(onTvCard, onTv >= 0 ? String.valueOf(onTv) : installed ? "ישנה" : "—",
+                onTv >= 0 ? "גרסה" : installed ? "לפני מספור הגרסאות" : "לא מותקן", 0xFF1B1E27, Color.WHITE);
+        setCard(onlineCard, online > 0 ? String.valueOf(online) : online == -2 ? "…" : "?",
+                online > 0 ? "גרסה" : online == -2 ? "בודק" : "אין חיבור לאינטרנט", 0xFF1B1E27, Color.WHITE);
+        int target = Math.max(online, mine);
+        if (online == -2) {
+            setCard(targetCard, "…", "בודק", 0xFF1B1E27, 0xFF9AA0AD);
+        } else if (target <= 0) {
+            setCard(targetCard, "?", "לא ידוע", 0xFF1B1E27, 0xFF9AA0AD);
+        } else if (!installed) {
+            setCard(targetCard, String.valueOf(target), "תותקן גרסה", 0xFF0A60D6, Color.WHITE);
+        } else if (onTv >= target) {
+            setCard(targetCard, "✓", "מעודכן לגרסה האחרונה", 0xFF1E7F3C, Color.WHITE);
+        } else {
+            setCard(targetCard, String.valueOf(target), "אפשר לעדכן לגרסה", 0xFF0A60D6, Color.WHITE);
+        }
+    }
+
+    private TextView[] onTvCard, onlineCard, targetCard;
+
+    /** One card: a small title, a big value and a line under it. Returns {box holder, value, note}. */
+    private TextView[] versionCard(LinearLayout row, String title) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        box.setPadding(px(18), px(10), px(18), px(12));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(px(18));
+        bg.setColor(0xFF1B1E27);
+        box.setBackground(bg);
+        TextView head = line(title, 14, 0xFF9AA0AD, false);
+        head.setGravity(Gravity.CENTER);
+        TextView value = line("", 34, Color.WHITE, true);
+        value.setGravity(Gravity.CENTER);
+        value.setPadding(0, 0, 0, 0);
+        TextView note = line("", 13, 0xFFC9CDD6, false);
+        note.setGravity(Gravity.CENTER);
+        note.setPadding(0, 0, 0, 0);
+        box.addView(head);
+        box.addView(value);
+        box.addView(note);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(190), LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = px(8);
+        lp.rightMargin = px(8);
+        row.addView(box, lp);
+        return new TextView[]{head, value, note};
+    }
+
+    private void setCard(TextView[] card, String value, String note, int background, int valueColor) {
+        card[1].setText(value);
+        card[1].setTextColor(valueColor);
+        card[2].setText(note);
+        card[0].setTextColor(background == 0xFF1B1E27 ? 0xFF9AA0AD : 0xDDFFFFFF);
+        card[2].setTextColor(background == 0xFF1B1E27 ? 0xFFC9CDD6 : Color.WHITE);
+        ((GradientDrawable) ((View) card[0].getParent()).getBackground()).setColor(background);
     }
 
     /** "Install now": connect, and go; not connected yet, show the one-time pairing and start once it is done. */
@@ -534,11 +597,13 @@ public class MainActivity extends Activity {
                 status.setTextColor(0xFFC9CDD6);
                 status.setText(kit.step + "\n" + last);
             } else if (kit.done && kit.updated) {
+                if (!title.getText().toString().startsWith("✓")) showVersions(lastOnline);
                 title.setText("✓ הערכה עודכנה");
                 go.setText("למסך הבית");
                 status.setTextColor(0xFF30D158);
                 status.setText("השם, המקום, התמונות, סדר האפליקציות וההגדרות נשמרו.");
             } else if (kit.done && kit.removed) {
+                if (!title.getText().toString().startsWith("✓")) showVersions(lastOnline);
                 title.setText("✓ הערכה הוסרה");
                 go.setText("התקן מחדש");
                 status.setTextColor(0xFF30D158);
