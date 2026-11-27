@@ -140,12 +140,13 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.CENTER);
         root.setBackgroundColor(0xFF101218);
-        root.setPadding(px(80), px(40), px(80), px(40));
+        // Everything on one screen, no scrolling (Oran, 2026-11-27: "שהכל יכנס על המסך"): 540 dp of height on a TV.
+        root.setPadding(px(60), px(20), px(60), px(20));
 
-        title = line("התקנת מסך הבית", 36, Color.WHITE, true);
+        title = line("התקנת מסך הבית", 30, Color.WHITE, true);
         title.setGravity(Gravity.CENTER);
         root.addView(title);
-        sub = line("הכול מותקן לבד, תוך כמה שניות. לא לכבות את הטלוויזיה עד הסוף.", 18, 0xFFC9CDD6, false);
+        sub = line("הכול מותקן לבד, תוך כמה שניות. לא לכבות את הטלוויזיה עד הסוף.", 16, 0xFFC9CDD6, false);
         sub.setGravity(Gravity.CENTER);
         root.addView(sub);
 
@@ -159,36 +160,53 @@ public class MainActivity extends Activity {
         targetCard = versionCard(cards, "עדכון");
         LinearLayout.LayoutParams cardsLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        cardsLp.topMargin = px(22);
+        cardsLp.topMargin = px(16);
         cardsLp.gravity = Gravity.CENTER_HORIZONTAL;
         root.addView(cards, cardsLp);
+        versionCards = cards;
+
+        // The three buttons side by side (Install, Update, Remove): one row, so the bar and the words fit under them.
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        buttons.setGravity(Gravity.CENTER);
+        // Install on the right (read first in Hebrew), Remove on the left; room for the focused one to grow.
+        buttons.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
+        buttons.setClipChildren(false);
+        buttons.setClipToPadding(false);
+        buttons.setPadding(px(6), px(4), px(6), px(4));
+        root.setClipChildren(false);
+        LinearLayout.LayoutParams buttonsLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        buttonsLp.topMargin = px(20);
+        buttonsLp.gravity = Gravity.CENTER_HORIZONTAL;
+        root.addView(buttons, buttonsLp);
 
         go = new Button(this);
         go.setText("התקן עכשיו");
-        go.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26);
+        go.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19);
         go.setTypeface(Typeface.DEFAULT_BOLD);
         go.setAllCaps(false);
         go.setTextColor(0xFF101218);
         go.setBackground(pill(0xFFFFFFFF));
-        go.setPadding(px(48), px(14), px(48), px(14));
+        go.setPadding(px(30), px(10), px(30), px(10));
         go.setOnFocusChangeListener((v, focused) -> v.animate().scaleX(focused ? 1.06f : 1f).scaleY(focused ? 1.06f : 1f).setDuration(150).start());
         go.setOnClickListener(v -> pressed());
         LinearLayout.LayoutParams goLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        goLp.topMargin = px(28);
-        goLp.gravity = Gravity.CENTER_HORIZONTAL;
-        root.addView(go, goLp);
+        goLp.leftMargin = px(8);
+        goLp.rightMargin = px(8);
+        buttons.addView(go, 0, goLp);
 
         // "Update the current pack": only on a TV that already has our launcher. The newest launcher over the one
         // there, every setting of the owner's kept (Kit.updateOnly).
         update = new Button(this);
         update.setText("עדכון הערכה הנוכחית");
         update.setAllCaps(false);
-        update.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        update.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19);
         update.setTypeface(Typeface.DEFAULT_BOLD);
         update.setTextColor(Color.WHITE);
         GradientDrawable blue = pill(0xFF0A60D6);
         update.setBackground(blue);
-        update.setPadding(px(40), px(12), px(40), px(12));
+        update.setPadding(px(30), px(10), px(30), px(10));
         update.setOnFocusChangeListener((v, focused) -> {
             if (focused && autoLeft > 0) {
                 autoLeft = 0;
@@ -202,9 +220,9 @@ public class MainActivity extends Activity {
         update.setOnClickListener(v -> updatePressed());
         LinearLayout.LayoutParams updateLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        updateLp.topMargin = px(16);
-        updateLp.gravity = Gravity.CENTER_HORIZONTAL;
-        root.addView(update, updateLp);
+        updateLp.leftMargin = px(8);
+        updateLp.rightMargin = px(8);
+        buttons.addView(update, 0, updateLp);
         update.setVisibility(launcherInstalled() ? View.VISIBLE : View.GONE);
 
         // The bar: 1 to 100, green on a dim track, with the number beside it.
@@ -236,13 +254,13 @@ public class MainActivity extends Activity {
         percentLp.leftMargin = px(16);
         row.addView(percent, percentLp);
         LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(px(820), LinearLayout.LayoutParams.WRAP_CONTENT);
-        barLp.topMargin = px(32);
+        barLp.topMargin = px(20);
         barLp.gravity = Gravity.CENTER_HORIZONTAL;
         root.addView(row, barLp);
         row.setVisibility(View.INVISIBLE);
         barRow = row;
 
-        status = line("", 18, 0xFF30D158, false);
+        status = line("", 16, 0xFF30D158, false);
         status.setGravity(Gravity.CENTER);
         root.addView(status);
 
@@ -250,12 +268,12 @@ public class MainActivity extends Activity {
         remove = new Button(this);
         remove.setText("הסרת הערכה לחלוטין");
         remove.setAllCaps(false);
-        remove.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        remove.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19);
         remove.setTypeface(Typeface.DEFAULT_BOLD);
         remove.setTextColor(Color.WHITE);
         GradientDrawable red = pill(0xFFD70015);
         remove.setBackground(red);
-        remove.setPadding(px(36), px(10), px(36), px(10));
+        remove.setPadding(px(30), px(10), px(30), px(10));
         remove.setOnFocusChangeListener((v, focused) -> {
             // Choosing the red button stops the update that was about to start by itself.
             if (focused && autoLeft > 0) {
@@ -270,9 +288,9 @@ public class MainActivity extends Activity {
         remove.setOnClickListener(v -> confirmRemove());
         LinearLayout.LayoutParams removeLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        removeLp.topMargin = px(26);
-        removeLp.gravity = Gravity.CENTER_HORIZONTAL;
-        root.addView(remove, removeLp);
+        removeLp.leftMargin = px(8);
+        removeLp.rightMargin = px(8);
+        buttons.addView(remove, 0, removeLp);
         if (server == null) status.setText("לא הצלחתי לפתוח את השרת. לסגור את האפליקציה ולפתוח שוב.");
 
         // Only when the TV has not allowed this kit yet: the phone pairs it once.
@@ -283,7 +301,7 @@ public class MainActivity extends Activity {
         // a step done turns green with a check. Then the install goes on alone (tick looks every 3 s).
         LinearLayout steps = new LinearLayout(this);
         steps.setOrientation(LinearLayout.VERTICAL);
-        steps.addView(line("פעם אחת בלבד: לאשר לאפליקציה לעבוד על הטלוויזיה", 22, Color.WHITE, true));
+        steps.addView(line("פעם אחת בלבד: לאשר לאפליקציה לעבוד על הטלוויזיה", 19, Color.WHITE, true));
         stepDev = stepRow(steps, "1", "להדליק אפשרויות מפתחים: במסך שנפתח, 7 לחיצות ברצף על \"גרסת מערכת ההפעלה\"",
                 "פתח את המסך", () -> openSettings(android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS));
         stepAdb = stepRow(steps, "2", "במסך שנפתח, להדליק \"ניפוי באגים ב-USB\"",
@@ -293,13 +311,18 @@ public class MainActivity extends Activity {
         pairing.addView(steps, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         ImageView qr = new ImageView(this);
         qr.setImageBitmap(qrCode(url, 512));
-        LinearLayout.LayoutParams qrLp = new LinearLayout.LayoutParams(px(170), px(170));
-        qrLp.rightMargin = px(36);
+        LinearLayout.LayoutParams qrLp = new LinearLayout.LayoutParams(px(150), px(150));
+        qrLp.rightMargin = px(30);
         pairing.addView(qr, 0, qrLp);
         LinearLayout.LayoutParams pairLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        pairLp.topMargin = px(28);
+        pairLp.topMargin = px(14);
         root.addView(pairing, pairLp);
         pairing.setVisibility(waiting ? View.VISIBLE : View.GONE);
+        // While the pairing steps are up, the version cards step aside so the steps fit on the screen.
+        root.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            int want = pairing.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE;
+            if (versionCards.getVisibility() != want) versionCards.setVisibility(want);
+        });
 
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(0xFF101218);
@@ -411,20 +434,22 @@ public class MainActivity extends Activity {
     }
 
     private TextView[] onTvCard, onlineCard, targetCard;
+    /** The row of version cards: out of the way while the one-time pairing steps are on screen. */
+    private View versionCards;
 
     /** One card: a small title, a big value and a line under it. Returns {box holder, value, note}. */
     private TextView[] versionCard(LinearLayout row, String title) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER);
-        box.setPadding(px(18), px(10), px(18), px(12));
+        box.setPadding(px(14), px(4), px(14), px(10));
         GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(px(18));
         bg.setColor(0xFF1B1E27);
         box.setBackground(bg);
         TextView head = line(title, 14, 0xFF9AA0AD, false);
         head.setGravity(Gravity.CENTER);
-        TextView value = line("", 34, Color.WHITE, true);
+        TextView value = line("", 28, Color.WHITE, true);
         value.setGravity(Gravity.CENTER);
         value.setPadding(0, 0, 0, 0);
         TextView note = line("", 13, 0xFFC9CDD6, false);
@@ -433,10 +458,10 @@ public class MainActivity extends Activity {
         box.addView(head);
         box.addView(value);
         box.addView(note);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(190), LinearLayout.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(170), LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.leftMargin = px(8);
         lp.rightMargin = px(8);
-        row.addView(box, lp);
+        row.addView(box, 0, lp);   // right to left: the first card on the right
         return new TextView[]{head, value, note};
     }
 
@@ -1017,7 +1042,7 @@ public class MainActivity extends Activity {
         dot.setColor(0xFF3A3F4B);
         badge.setBackground(dot);
         row.addView(badge, new LinearLayout.LayoutParams(px(34), px(34)));
-        TextView words = line(text, 17, 0xFFE5E7EB, false);
+        TextView words = line(text, 15, 0xFFE5E7EB, false);
         words.setTextDirection(View.TEXT_DIRECTION_RTL);
         LinearLayout.LayoutParams wordsLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         wordsLp.setMarginStart(px(14));
@@ -1032,7 +1057,9 @@ public class MainActivity extends Activity {
             open.setTextColor(Color.WHITE);
             GradientDrawable fill = pill(0xFF0A60D6);
             open.setBackground(fill);
-            open.setPadding(px(24), px(8), px(24), px(8));
+            open.setPadding(px(20), px(4), px(20), px(4));
+            open.setMinHeight(0);
+            open.setMinimumHeight(px(38));
             open.setOnFocusChangeListener((v, focused) -> {
                 fill.setColor(focused ? 0xFF2F80FF : 0xFF0A60D6);
                 fill.setStroke(px(3), focused ? Color.WHITE : 0x00FFFFFF);
@@ -1042,7 +1069,7 @@ public class MainActivity extends Activity {
         }
         LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        rowLp.topMargin = px(12);
+        rowLp.topMargin = px(8);
         parent.addView(row, rowLp);
         return badge;
     }
