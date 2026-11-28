@@ -83,6 +83,12 @@ public class MainActivity extends Activity {
             if (autoLeft <= 0 || kit.running || kit.done || isFinishing()) return;
             status.setText("התקנה מלאה בעוד " + autoLeft + "…  (למטה: עדכון ששומר הכול, או הסרה)");
             if (--autoLeft == 0) {
+                if (lastOnline == -2) {
+                    // The version online isn't known yet: wait for it, a TV that is up to date installs nothing.
+                    autoLeft = 1;
+                    handler.postDelayed(this, 1000);
+                    return;
+                }
                 pressed();
                 return;
             }
@@ -340,6 +346,7 @@ public class MainActivity extends Activity {
                     handler.removeCallbacks(countdown);
                     status.setTextColor(0xFF30D158);
                     status.setText("אין צורך להתקין את הגרסה החדשה, מעודכן לגרסה הכי חדשה");
+                    if (!getIntent().getBooleanExtra("show_steps", false) && !trial) showUpToDate();
                 }
             });
         }, "kit-version").start();
@@ -356,6 +363,11 @@ public class MainActivity extends Activity {
         // for trying again).
         // A look at the one-time steps without touching the TV (adb shell am start ... --ez show_steps true): for
         // screenshots of a TV that is already connected. Nothing starts by itself then.
+        // A look at the 3, 2, 1 that follows an install (adb shell am start ... --ez show_countdown true).
+        if (getIntent().getBooleanExtra("show_countdown", false)) {
+            closeCountdown("✓ הערכה הותקנה");
+            return;
+        }
         if (getIntent().getBooleanExtra("show_steps", false)) {
             show(pairing);
             markSteps();
@@ -489,6 +501,10 @@ public class MainActivity extends Activity {
             startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             return;
         }
+        if (!trial && upToDate()) {
+            showUpToDate();
+            return;
+        }
         status.setText("מתחבר לטלוויזיה… אם קופץ חלון \"לאפשר ניפוי באגים?\": לסמן \"אפשר תמיד\" וללחוץ אישור");
         status.setTextColor(0xFFC9CDD6);
         new Thread(() -> {
@@ -528,6 +544,10 @@ public class MainActivity extends Activity {
             kit.updated = false;
             kit.removed = false;
         }
+        if (upToDate()) {
+            showUpToDate();
+            return;
+        }
         title.setText("מעדכן את הערכה…");
         status.setText("מתחבר לטלוויזיה…");
         status.setTextColor(0xFFC9CDD6);
@@ -548,6 +568,176 @@ public class MainActivity extends Activity {
                 }
             });
         }, "kit-update").start();
+    }
+
+    /**
+     * The TV already has the newest pack (Oran, 2026-11-28: no reinstalling it then). Known only once the version
+     * online has been checked; with no internet, the newest this app can bring is its own.
+     */
+    private boolean upToDate() {
+        if (lastOnline == -2 || !launcherInstalled()) return false;
+        int target = Math.max(lastOnline, Kit.installedVersion(this, getPackageName()));
+        int onTv = Kit.installedVersion(this, Kit.PKG);
+        return target > 0 && onTv >= target;
+    }
+
+    private android.app.Dialog upToDateDialog;
+
+    /** A card over the screen: nothing to update, this TV is on the newest version. */
+    private void showUpToDate() {
+        if (closing || isFinishing() || (upToDateDialog != null && upToDateDialog.isShowing())) return;
+        int version = Kit.installedVersion(this, Kit.PKG);
+        android.app.Dialog dialog = new android.app.Dialog(this, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar);
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER_HORIZONTAL);
+        card.setPadding(px(44), px(26), px(44), px(24));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(px(26));
+        bg.setColor(0xFF1B1E27);
+        bg.setStroke(px(2), 0xFF1E7F3C);
+        card.setBackground(bg);
+        TextView check = new TextView(this);
+        check.setText("✓");
+        check.setTextSize(TypedValue.COMPLEX_UNIT_SP, 34);
+        check.setTypeface(Typeface.DEFAULT_BOLD);
+        check.setTextColor(Color.WHITE);
+        check.setGravity(Gravity.CENTER);
+        GradientDrawable circle = new GradientDrawable();
+        circle.setShape(GradientDrawable.OVAL);
+        circle.setColor(0xFF1E7F3C);
+        check.setBackground(circle);
+        card.addView(check, new LinearLayout.LayoutParams(px(70), px(70)));
+        TextView heading = line("לא צריך לעדכן", 26, Color.WHITE, true);
+        heading.setGravity(Gravity.CENTER);
+        card.addView(heading);
+        TextView note = line("הטלוויזיה כבר על הגרסה הכי חדשה" + (version > 0 ? " (" + version + ")" : "") + ".\nאין מה להתקין מחדש.",
+                17, 0xFFC9CDD6, false);
+        note.setGravity(Gravity.CENTER);
+        card.addView(note);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+        Button ok = button("הבנתי", true);
+        Button home = button("למסך הבית", false);
+        for (Button b : new Button[]{ok, home}) b.setSingleLine(true);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(px(200), LinearLayout.LayoutParams.WRAP_CONTENT);
+        blp.leftMargin = px(8);
+        blp.rightMargin = px(8);
+        row.addView(ok, 0, blp);
+        row.addView(home, 0, new LinearLayout.LayoutParams(blp));   // right to left: "OK" on the right
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rlp.topMargin = px(16);
+        card.addView(row, rlp);
+        ok.setOnClickListener(v -> dialog.dismiss());
+        home.setOnClickListener(v -> {
+            dialog.dismiss();
+            openHome();
+            finish();
+        });
+        dialog.setContentView(card);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            dialog.getWindow().setDimAmount(0.6f);
+        }
+        dialog.setOnShowListener(d -> {
+            ok.requestFocus();
+            card.setScaleX(0.9f);
+            card.setScaleY(0.9f);
+            card.setAlpha(0f);
+            card.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(260).setInterpolator(new DecelerateInterpolator(2f)).start();
+        });
+        upToDateDialog = dialog;
+        dialog.show();
+    }
+
+    /** Our home screen in front. */
+    private void openHome() {
+        try {
+            startActivity(new Intent(Intent.ACTION_MAIN)
+                    .setComponent(new ComponentName(Kit.PKG, Kit.PKG + ".MainActivity"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (Exception e) {
+            startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        }
+    }
+
+    private boolean closing;
+
+    /**
+     * After an install or an update (Oran, 2026-11-28): a ring that empties over 3 seconds around 3, 2, 1, then this
+     * app closes and the home screen is in front. OK goes at once.
+     */
+    private void closeCountdown(String heading) {
+        if (closing || isFinishing()) return;
+        closing = true;
+        LinearLayout page = screen(heading, "חוזרים למסך הבית…");
+        FrameLayout dial = new FrameLayout(this);
+        float[] left = {1f};
+        android.graphics.Paint track = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        track.setStyle(android.graphics.Paint.Style.STROKE);
+        track.setStrokeWidth(px(8));
+        track.setColor(0xFF2A2E3A);
+        android.graphics.Paint arc = new android.graphics.Paint(track);
+        arc.setColor(0xFF30D158);
+        arc.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+        View ring = new View(this) {
+            @Override
+            protected void onDraw(android.graphics.Canvas c) {
+                float in = px(8);
+                android.graphics.RectF r = new android.graphics.RectF(in, in, getWidth() - in, getHeight() - in);
+                c.drawOval(r, track);
+                c.drawArc(r, -90, 360f * left[0], false, arc);
+            }
+        };
+        dial.addView(ring, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        TextView number = line("3", 54, Color.WHITE, true);
+        number.setGravity(Gravity.CENTER);
+        number.setPadding(0, 0, 0, 0);
+        dial.addView(number, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(px(150), px(150));
+        dlp.topMargin = px(22);
+        dlp.gravity = Gravity.CENTER_HORIZONTAL;
+        page.addView(dial, dlp);
+        Button now = button("למסך הבית עכשיו", true);
+        add(page, now, 22, 0);
+        present(page);
+        now.requestFocus();
+        android.animation.ValueAnimator run = android.animation.ValueAnimator.ofFloat(1f, 0f);
+        run.setDuration(3000);
+        run.setInterpolator(new android.view.animation.LinearInterpolator());
+        int[] shownSecond = {3};
+        Runnable leave = () -> {
+            if (isFinishing()) return;
+            openHome();
+            finish();
+            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+        };
+        run.addUpdateListener(a -> {
+            left[0] = (float) a.getAnimatedValue();
+            ring.invalidate();
+            int second = Math.max(1, (int) Math.ceil(left[0] * 3 - 0.0001));
+            if (second != shownSecond[0]) {
+                shownSecond[0] = second;
+                number.setText(String.valueOf(second));
+                number.setScaleX(1.35f);
+                number.setScaleY(1.35f);
+                number.setAlpha(0.4f);
+                number.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(320).setInterpolator(new DecelerateInterpolator(2f)).start();
+            }
+        });
+        run.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator a) {
+                leave.run();
+            }
+        });
+        now.setOnClickListener(v -> {
+            run.removeAllListeners();
+            run.cancel();
+            leave.run();
+        });
+        run.start();
     }
 
     /** The red button asks once more: it takes our home screen off the TV and puts the TV's own back. */
@@ -622,7 +812,11 @@ public class MainActivity extends Activity {
                 status.setTextColor(0xFFC9CDD6);
                 status.setText(kit.step + "\n" + last);
             } else if (kit.done && kit.updated) {
-                if (!title.getText().toString().startsWith("✓")) showVersions(lastOnline);
+                if (!title.getText().toString().startsWith("✓")) {
+                    showVersions(lastOnline);
+                    // A moment on 100/100, then 3, 2, 1 and the home screen.
+                    handler.postDelayed(() -> closeCountdown("✓ הערכה עודכנה"), 900);
+                }
                 title.setText("✓ הערכה עודכנה");
                 go.setText("למסך הבית");
                 status.setTextColor(0xFF30D158);
@@ -1007,16 +1201,7 @@ public class MainActivity extends Activity {
                         state.setTextColor(0xFFFF453A);
                         return;
                     }
-                    present(screen("✓ הכול מוכן", "מסך הבית שלך נפתח. אפשר להוציא את ה-USB."));
-                    handler.postDelayed(() -> {
-                        try {
-                            startActivity(new Intent(Intent.ACTION_MAIN)
-                                    .setComponent(new ComponentName(Kit.PKG, Kit.PKG + ".MainActivity"))
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-                        } catch (Exception ignored) {
-                        }
-                        finish();
-                    }, 2200);
+                    closeCountdown("✓ הערכה הותקנה");
                 });
             }, "kit-finish").start();
         });
